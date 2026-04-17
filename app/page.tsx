@@ -82,6 +82,7 @@ function formatFileSize(bytes: number) {
 export default function Home() {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const dropzoneRef = useRef<HTMLLabelElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
@@ -119,6 +120,21 @@ export default function Home() {
 
   function handleContinue() {
     router.push('/order')
+  }
+
+  function handleTiltMove(e: React.MouseEvent<HTMLLabelElement>) {
+    const el = dropzoneRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const x = (e.clientX - r.left) / r.width - 0.5
+    const y = (e.clientY - r.top) / r.height - 0.5
+    el.style.transform = `perspective(1200px) rotateX(${-y * 5}deg) rotateY(${x * 5}deg) translateZ(4px)`
+  }
+
+  function handleTiltLeave() {
+    const el = dropzoneRef.current
+    if (!el) return
+    el.style.transform = ''
   }
 
   return (
@@ -172,29 +188,41 @@ export default function Home() {
 
                 {!selectedFile ? (
                   <label
+                    ref={dropzoneRef}
                     htmlFor="hero-upload"
                     className={`mib-upload__dropzone${isDragging ? ' is-dragging' : ''}`}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
+                    onMouseMove={handleTiltMove}
+                    onMouseLeave={handleTiltLeave}
                   >
-                    <div className="mib-upload__iconWrap" aria-hidden="true">
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
+                    <span className="mib-upload__swirl" aria-hidden="true" />
+                    <span className="mib-upload__grain" aria-hidden="true" />
+                    <span className="mib-upload__glass" aria-hidden="true" />
+                    <div className="mib-upload__inner">
+                      <div className="mib-upload__icon" aria-hidden="true">
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="17 8 12 3 7 8" />
+                          <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                      </div>
+                      <div className="mib-upload__contentBlock">
+                        <p className="mib-upload__title">Drag and drop your design</p>
+                        <p className="mib-upload__subtext">or click to upload — we'll guide you from there</p>
+                      </div>
+                      <span className="mib-upload__button">Choose File</span>
                     </div>
-                    <p className="mib-upload__title">Drop your design here</p>
-                    <p className="mib-upload__subtext">or tap to browse your files</p>
-                    <span className="mib-upload__button">Choose File</span>
-                    <p className="mib-upload__hint">PNG · JPG · PDF &nbsp;·&nbsp; Up to 50 MB</p>
                   </label>
                 ) : (
                   <div className="mib-upload__dropzone has-file">
-                    <div className="mib-upload__success">
+                    <span className="mib-upload__swirl" aria-hidden="true" />
+                    <span className="mib-upload__grain" aria-hidden="true" />
+                    <span className="mib-upload__glass" aria-hidden="true" />
+                    <div className="mib-upload__inner">
                       <div className="mib-upload__successIcon" aria-hidden="true">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M20 6L9 17l-5-5" />
                         </svg>
                       </div>
@@ -210,7 +238,6 @@ export default function Home() {
                         Replace
                       </button>
                     </div>
-
                     <div className="mib-upload__nextStep">
                       <button
                         type="button"
