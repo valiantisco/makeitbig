@@ -1,28 +1,66 @@
 import { Suspense } from 'react'
-import { createClient } from '@/lib/supabase/server'
 import OrderFlow from './order-flow'
 
-export default async function OrderPage() {
-  const supabase = await createClient()
-  const { data: products, error } = await supabase
-    .from('products')
-    .select('*')
-    .eq('active', true)
-    .order('width_in', { ascending: true })
+const STATIC_PRODUCTS = [
+  {
+    id: 'banner-24x36',
+    name: '24×36 Vinyl Banner',
+    width_in: 24,
+    height_in: 36,
+    material: 'Matte Vinyl',
+    finish: 'Matte',
+    price_cents: 3000,
+    cost_cents: null,
+    active: true,
+  },
+  {
+    id: 'banner-36x72',
+    name: '36×72 Vinyl Banner',
+    width_in: 36,
+    height_in: 72,
+    material: 'Matte Vinyl',
+    finish: 'Matte',
+    price_cents: 7500,
+    cost_cents: null,
+    active: true,
+  },
+  {
+    id: 'banner-48x96',
+    name: '48×96 Vinyl Banner',
+    width_in: 48,
+    height_in: 96,
+    material: 'Matte Vinyl',
+    finish: 'Matte',
+    price_cents: 15000,
+    cost_cents: null,
+    active: true,
+  },
+]
 
-  if (error || !products) {
-    return (
-      <main className="min-h-screen bg-black px-6 py-20 text-white">
-        <div className="mx-auto max-w-5xl">
-          <h1 className="text-3xl font-bold">Order</h1>
-          <p className="mt-6 text-red-400">Failed to load products.</p>
-        </div>
-      </main>
-    )
+async function loadProducts() {
+  // Use Supabase when env vars are available, otherwise fall back to static data
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return STATIC_PRODUCTS
   }
+  try {
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('active', true)
+      .order('width_in', { ascending: true })
+    if (error || !data || data.length === 0) return STATIC_PRODUCTS
+    return data
+  } catch {
+    return STATIC_PRODUCTS
+  }
+}
+
+export default async function OrderPage() {
+  const products = await loadProducts()
 
   return (
-    // Suspense boundary required because OrderFlow calls useSearchParams
     <Suspense>
       <OrderFlow products={products} />
     </Suspense>
