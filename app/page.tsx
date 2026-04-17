@@ -6,24 +6,51 @@ import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react'
 
 const HOW_IT_WORKS = [
   {
+    step: '01',
     title: 'Upload your design',
-    body: "Drag it in and we'll take it from there.",
-    artifact: 'upload',
+    body: "Drop in your file and we take it from there. PDF, PNG, or JPG.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" y1="3" x2="12" y2="15" />
+      </svg>
+    ),
   },
   {
+    step: '02',
     title: 'We check it for you',
-    body: "We'll tell you if it looks sharp, slightly soft, or would work better at a different size.",
-    artifact: 'check',
+    body: "We review your file and flag anything that might not print well before you order.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    ),
   },
   {
-    title: 'Preview it big',
-    body: 'See the exact size, proportions, and overall look before you buy.',
-    artifact: 'preview',
+    step: '03',
+    title: 'Preview it at full size',
+    body: 'See exactly how your banner will look before committing. No guesswork.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
   },
   {
-    title: 'We print and ship',
-    body: 'Printed in the USA on durable matte vinyl and sent out fast.',
-    artifact: 'ship',
+    step: '04',
+    title: 'We print and ship fast',
+    body: 'Matte vinyl, printed in the USA. At your door in 3 to 5 days.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="1" y="3" width="15" height="13" />
+        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+        <circle cx="5.5" cy="18.5" r="2.5" />
+        <circle cx="18.5" cy="18.5" r="2.5" />
+      </svg>
+    ),
   },
 ]
 
@@ -117,12 +144,14 @@ export default function Home() {
         <div className="mib-hero__top">
           <div className="mib-shell">
             <div className="mib-hero__content">
-              <p className="mib-hero__eyebrow">Large-Format Banner Printing</p>
+              <p className="mib-hero__eyebrow">Banner Printing, Made Simple</p>
 
               <h1 className="mib-hero__title">
-                Upload your design.
+                Your design.
                 <br />
-                See it big in seconds.
+                Big and impossible
+                <br />
+                to ignore.
               </h1>
 
               <div className="mib-upload">
@@ -173,9 +202,7 @@ export default function Home() {
                 </label>
 
                 <p className="mib-hero__subcopy">
-                  We got tired of print sites that made simple banner orders feel
-                  confusing. So we built one that doesn't: fast preview, clear
-                  guidance, and zero guesswork.
+                  Upload your file. We check it, preview it at full size, then print and ship it fast. No confusing steps, no surprises.
                 </p>
               </div>
             </div>
@@ -213,14 +240,17 @@ export default function Home() {
       <section className="mib-section mib-hiw" id="how-it-works">
         <div className="mib-shell">
           <div className="mib-sectionIntro mib-sectionIntro--center">
-            <h2 className="mib-sectionIntro__title">From your file to your door</h2>
+            <h2 className="mib-sectionIntro__title">Four steps. That's all.</h2>
           </div>
 
           <div className="mib-hiwGrid">
-            {HOW_IT_WORKS.map((item, index) => (
+            {HOW_IT_WORKS.map((item) => (
               <article key={item.title} className="mib-hiwCard">
+                <div className="mib-hiwCard__stepIcon" aria-hidden="true">
+                  {item.icon}
+                </div>
                 <div className="mib-hiwCard__num" aria-hidden="true">
-                  {String(index + 1).padStart(2, '0')}
+                  {item.step}
                 </div>
                 <h3 className="mib-hiwCard__title">{item.title}</h3>
                 <p className="mib-hiwCard__body">{item.body}</p>
@@ -240,30 +270,51 @@ export default function Home() {
 
           <div className="mib-pricingGrid">
             <article className="mib-priceCard">
-              <div className="mib-priceCard__size">24 x 36</div>
+              <div className="mib-priceCard__size">24" x 36" inches</div>
               <div className="mib-priceCard__price">$30</div>
-              <p className="mib-priceCard__use">Best for booths and smaller spaces</p>
+              <p className="mib-priceCard__shipping">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 12l2 2 4-4" />
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+                Shipping included
+              </p>
+              <p className="mib-priceCard__use">Great for trade show booths, events, and smaller spaces</p>
               <Link href="#hero" className="mib-priceCard__cta">Order This Size</Link>
             </article>
 
             <article className="mib-priceCard mib-priceCard--featured">
               <span className="mib-priceCard__badge">Most Popular</span>
-              <div className="mib-priceCard__size">36 x 72</div>
+              <div className="mib-priceCard__size">36" x 72" inches</div>
               <div className="mib-priceCard__price">$75</div>
-              <p className="mib-priceCard__use">Strong visibility without going overboard</p>
+              <p className="mib-priceCard__shipping">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 12l2 2 4-4" />
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+                Shipping included
+              </p>
+              <p className="mib-priceCard__use">Strong street-level visibility without going overboard</p>
               <Link href="#hero" className="mib-priceCard__cta mib-priceCard__cta--featured">Order This Size</Link>
             </article>
 
             <article className="mib-priceCard">
-              <div className="mib-priceCard__size">48 x 96</div>
+              <div className="mib-priceCard__size">48" x 96" inches</div>
               <div className="mib-priceCard__price">$150</div>
-              <p className="mib-priceCard__use">Maximum presence when size matters</p>
+              <p className="mib-priceCard__shipping">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 12l2 2 4-4" />
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+                Shipping included
+              </p>
+              <p className="mib-priceCard__use">Maximum presence. When you need to fill a wall or a room</p>
               <Link href="#hero" className="mib-priceCard__cta">Order This Size</Link>
             </article>
           </div>
 
           <p className="mib-pricing__finePrint">
-            Includes printing + shipping. Matte vinyl, printed in the USA.
+            All orders: matte vinyl, printed in the USA, reprinted free if anything's off.
           </p>
         </div>
       </section>
@@ -334,19 +385,37 @@ export default function Home() {
       {/* ── GALLERY ──────────────────────────────────────── */}
       <section className="mib-section mib-gallery" id="gallery">
         <div className="mib-shell">
-          <h2 className="mib-gallery__heading">Real prints. Real results.</h2>
-          <p className="mib-gallery__subhead">Samples on the way. Every size ships from our facility in the USA.</p>
+          <h2 className="mib-gallery__heading">Three sizes. All built to stand out.</h2>
+          <p className="mib-gallery__subhead">Matte vinyl, printed in the USA. Actual product photos coming soon.</p>
 
           <div className="mib-galleryGrid">
-            {['24 x 36 Banner', '36 x 72 Banner', '48 x 96 Banner', '24 x 36 Banner', '36 x 72 Banner', '48 x 96 Banner'].map((label, i) => (
-              <div key={i} className="mib-gallerySlot">
-                <span className="mib-gallerySlot__label">{label}</span>
+            <Link href="#hero" className="mib-gallerySlot mib-gallerySlot--sm">
+              <div className="mib-gallerySlot__banner" aria-hidden="true" />
+              <div className="mib-gallerySlot__info">
+                <span className="mib-gallerySlot__size">24" x 36"</span>
+                <span className="mib-gallerySlot__price">Starting at $30</span>
               </div>
-            ))}
+            </Link>
+
+            <Link href="#hero" className="mib-gallerySlot mib-gallerySlot--md">
+              <div className="mib-gallerySlot__banner" aria-hidden="true" />
+              <div className="mib-gallerySlot__info">
+                <span className="mib-gallerySlot__size">36" x 72"</span>
+                <span className="mib-gallerySlot__price">Starting at $75</span>
+              </div>
+            </Link>
+
+            <Link href="#hero" className="mib-gallerySlot mib-gallerySlot--lg">
+              <div className="mib-gallerySlot__banner" aria-hidden="true" />
+              <div className="mib-gallerySlot__info">
+                <span className="mib-gallerySlot__size">48" x 96"</span>
+                <span className="mib-gallerySlot__price">Starting at $150</span>
+              </div>
+            </Link>
           </div>
 
-          <div className="flex justify-center mt-12">
-            <Link href="#hero" className="mib-galleryBtn">Start Your Order</Link>
+          <div className="flex justify-center mt-14">
+            <Link href="#hero" className="mib-galleryBtn">Order Your Banner Now</Link>
           </div>
         </div>
       </section>
@@ -355,9 +424,9 @@ export default function Home() {
       <section className="mib-finalCta">
         <div className="mib-shell">
           <div className="mib-finalCta__content">
-            <h2 className="mib-finalCta__title">This is going to turn heads.</h2>
+            <h2 className="mib-finalCta__title">Your event deserves a banner that shows up.</h2>
             <p className="mib-finalCta__copy">
-              Upload your design, preview it big, and order with confidence.
+              Upload your file, see it at full size, and order in minutes.
             </p>
 
             <div className="mib-finalCta__actions">
@@ -368,23 +437,33 @@ export default function Home() {
 
             <div className="mib-finalCta__trustRow">
               <span className="mib-finalCta__trustMark">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
-                  <path d="M3 8l3.5 3.5L13 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
+                  <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
                 </svg>
-                Reprinted if it's not right
+                Reprinted free if it's not right
               </span>
               <span className="mib-finalCta__trustMark">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
-                  <path d="M3 8l3.5 3.5L13 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
+                  <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
                 </svg>
                 Printed in the USA
               </span>
               <span className="mib-finalCta__trustMark">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
-                  <path d="M3 8l3.5 3.5L13 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
+                  <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
                 </svg>
                 Ships in 3-5 days
               </span>
+            </div>
+
+            <div className="mib-finalCta__testimonial">
+              <p className="mib-finalCta__quote">
+                "I uploaded my logo, got a preview in seconds, and the banner arrived before my event. Exactly what I needed."
+              </p>
+              <p className="mib-finalCta__attribution">Sarah M. — Phoenix, AZ</p>
             </div>
           </div>
         </div>
