@@ -1,44 +1,8 @@
 import { Suspense } from 'react'
 import OrderFlow from './order-flow'
+import { STATIC_PRODUCTS, type Product } from '@/lib/products'
 
-const STATIC_PRODUCTS = [
-  {
-    id: 'banner-24x36',
-    name: '24×36 Vinyl Banner',
-    width_in: 24,
-    height_in: 36,
-    material: 'Matte Vinyl',
-    finish: 'Matte',
-    price_cents: 3000,
-    cost_cents: null,
-    active: true,
-  },
-  {
-    id: 'banner-36x72',
-    name: '36×72 Vinyl Banner',
-    width_in: 36,
-    height_in: 72,
-    material: 'Matte Vinyl',
-    finish: 'Matte',
-    price_cents: 7500,
-    cost_cents: null,
-    active: true,
-  },
-  {
-    id: 'banner-48x96',
-    name: '48×96 Vinyl Banner',
-    width_in: 48,
-    height_in: 96,
-    material: 'Matte Vinyl',
-    finish: 'Matte',
-    price_cents: 15000,
-    cost_cents: null,
-    active: true,
-  },
-]
-
-async function loadProducts() {
-  // Use Supabase when env vars are available, otherwise fall back to static data
+async function loadProducts(): Promise<Product[]> {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return STATIC_PRODUCTS
   }

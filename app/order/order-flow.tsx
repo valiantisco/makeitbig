@@ -4,22 +4,12 @@ import { useEffect, useRef, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
+import { getPendingFile, clearPendingFile } from '@/lib/file-store'
+import type { Product } from '@/lib/products'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type Product = {
-  id: string
-  name: string
-  width_in: number
-  height_in: number
-  material: string
-  finish: string
-  price_cents: number
-  cost_cents: number | null
-  active: boolean
-}
 
 type ValidationStatus = 'good' | 'warn' | 'bad'
 
@@ -45,14 +35,11 @@ type FileState = {
   validation: ValidationResult | null
 }
 
-type CheckoutState = 'idle' | 'submitting' | 'error'
-
 type DeliveryEstimate = {
   range: string
   note?: string
 }
 
-// Serializable subset saved to sessionStorage for refresh continuity
 type ResumeDraft = {
   productId: string
   fileName: string
@@ -76,12 +63,6 @@ const STANDARD_DELIVERY: DeliveryEstimate = {
   note: 'After file approval',
 }
 
-/**
- * Flip to true once Supabase Storage upload + Stripe session are wired.
- * Controls whether the checkout CTA is active or shows a dev placeholder.
- */
-const CHECKOUT_ENABLED = false
-
 const RESUME_DRAFT_KEY = 'mib_resume_draft'
 
 // ---------------------------------------------------------------------------
@@ -91,9 +72,7 @@ const RESUME_DRAFT_KEY = 'mib_resume_draft'
 function saveResumeDraft(draft: ResumeDraft): void {
   try {
     sessionStorage.setItem(RESUME_DRAFT_KEY, JSON.stringify(draft))
-  } catch {
-    // sessionStorage may be unavailable (private mode, storage full)
-  }
+  } catch {}
 }
 
 function loadResumeDraft(): ResumeDraft | null {
@@ -116,18 +95,11 @@ function clearResumeDraft(): void {
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Returns plain-language context for how a banner this size is typically viewed.
- * Used to make validation messages meaningful relative to the actual product.
- */
 function getViewingContext(product: Pick<Product, 'width_in' | 'height_in'>): {
   distance: string
   closeness: 'close' | 'medium' | 'far'
 } {
   const sqIn = product.width_in * product.height_in
-  // 24×36 = 864 sq in → close-up reading distance
-  // 36×72 = 2592 sq in → mid-range viewing
-  // 48×96 = 4608 sq in → large format, viewed from a distance
   if (sqIn <= 900) return { distance: 'up close', closeness: 'close' }
   if (sqIn <= 2700) return { distance: 'a few feet away', closeness: 'medium' }
   return { distance: '10+ feet away', closeness: 'far' }
@@ -221,9 +193,7 @@ export default function OrderFlow({ products }: OrderFlowProps) {
     [products, selectedId],
   )
 
-  // Whether the upload section currently has an active file
   const [hasActiveFile, setHasActiveFile] = useState(false)
-  // A size the user clicked while a file was active — awaiting confirmation
   const [pendingProductId, setPendingProductId] = useState<string | null>(null)
 
   const pendingProduct = useMemo(
@@ -240,7 +210,6 @@ export default function OrderFlow({ products }: OrderFlowProps) {
   function handleSelect(productId: string) {
     if (productId === selectedId) return
     if (hasActiveFile) {
-      // Intercept — ask for confirmation before clearing file state
       setPendingProductId(productId)
       return
     }
@@ -258,6 +227,11 @@ export default function OrderFlow({ products }: OrderFlowProps) {
 
   function handleCancelSizeChange() {
     setPendingProductId(null)
+  }
+
+  function handleContinueToCheckout() {
+    const params = new URLSearchParams(searchParams.toString())
+    router.push(`/order/checkout?${params.toString()}`)
   }
 
   return (
@@ -278,11 +252,7 @@ export default function OrderFlow({ products }: OrderFlowProps) {
           </Link>
 
           <div className="flex items-center gap-1">
-            <StepPill
-              number="01"
-              label="Size"
-              state={selectedProduct ? 'done' : 'active'}
-            />
+            <StepPill number="01" label="Size" state={selectedProduct ? 'done' : 'active'} />
             <div className="h-px w-6 bg-white/20" />
             <StepPill
               number="02"
@@ -296,11 +266,7 @@ export default function OrderFlow({ products }: OrderFlowProps) {
               }
             />
             <div className="h-px w-6 bg-white/20" />
-            <StepPill
-              number="03"
-              label="Checkout"
-              state="inactive"
-            />
+            <StepPill number="03" label="Checkout" state="inactive" />
           </div>
         </div>
       </nav>
@@ -356,6 +322,7 @@ export default function OrderFlow({ products }: OrderFlowProps) {
             key={selectedProduct.id}
             selectedProduct={selectedProduct}
             onFileStateChange={setHasActiveFile}
+            onContinue={handleContinueToCheckout}
           />
         )}
       </main>
@@ -384,7 +351,7 @@ function StepPill({
 
   if (state === 'done') {
     return (
-      <span className={`${base}`} style={{ backgroundColor: 'rgba(255,255,255,0.4)', color: '#fff' }}>
+      <span className={base} style={{ backgroundColor: 'rgba(255,255,255,0.4)', color: '#fff' }}>
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
           <path d="M1.5 5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -395,7 +362,7 @@ function StepPill({
 
   return (
     <span
-      className={`${base}`}
+      className={base}
       style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}
     >
       {number} {label}
@@ -421,10 +388,7 @@ function SizeChangeConfirmation({
   return (
     <div
       className="mt-8 rounded-2xl bg-white px-6 py-6"
-      style={{
-        borderTop: '4px solid #f4c33d',
-        boxShadow: '0 1px 3px rgba(23,24,28,0.07)',
-      }}
+      style={{ borderTop: '4px solid #f4c33d', boxShadow: '0 1px 3px rgba(23,24,28,0.07)' }}
       role="alertdialog"
       aria-label="Confirm size change"
     >
@@ -432,8 +396,7 @@ function SizeChangeConfirmation({
         Switch to {sizeLabel}?
       </p>
       <p className="mt-1 text-sm" style={{ color: 'rgba(23,24,28,0.55)' }}>
-        Your current file will be cleared and you&apos;ll need to re-upload it. Quality will be
-        re-checked against the new size.
+        Your current file will be cleared and you&apos;ll need to re-upload it.
       </p>
       <div className="mt-5 flex gap-3">
         <button
@@ -477,43 +440,14 @@ function ProductCard({
 
   const bannerStyle: React.CSSProperties =
     product.width_in === 24
-      ? {
-          width: '64px',
-          height: '96px',
-          background: 'linear-gradient(145deg, #c40036, #8b001f)',
-          borderRadius: '6px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        }
+      ? { width: '64px', height: '96px', background: 'linear-gradient(145deg, #c40036, #8b001f)', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }
       : product.width_in === 36
-      ? {
-          width: '64px',
-          height: '128px',
-          background: 'linear-gradient(145deg, #17c1ce, #0e8a94)',
-          borderRadius: '6px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        }
-      : {
-          width: '76px',
-          height: '152px',
-          background: 'linear-gradient(145deg, #f4c33d, #c89b00)',
-          borderRadius: '6px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        }
-
-  const dimLabel = `${product.width_in} × ${product.height_in}`
+      ? { width: '64px', height: '128px', background: 'linear-gradient(145deg, #17c1ce, #0e8a94)', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }
+      : { width: '76px', height: '152px', background: 'linear-gradient(145deg, #f4c33d, #c89b00)', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }
 
   const cardStyle: React.CSSProperties = isSelected
-    ? {
-        borderTop: '4px solid #c40036',
-        backgroundColor: 'rgba(196,0,54,0.03)',
-        border: '1px solid rgba(196,0,54,0.18)',
-        borderTopWidth: '4px',
-        borderTopColor: '#c40036',
-      }
-    : {
-        border: '1px solid rgba(23,24,28,0.08)',
-        backgroundColor: '#ffffff',
-      }
+    ? { border: '1px solid rgba(196,0,54,0.18)', borderTopWidth: '4px', borderTopColor: '#c40036', backgroundColor: 'rgba(196,0,54,0.03)' }
+    : { border: '1px solid rgba(23,24,28,0.08)', backgroundColor: '#ffffff' }
 
   return (
     <button
@@ -521,64 +455,34 @@ function ProductCard({
       onClick={() => onSelect(product.id)}
       aria-pressed={isSelected}
       className="group relative flex flex-col rounded-3xl p-8 text-left transition-all duration-200"
-      style={{
-        ...cardStyle,
-        borderRadius: '24px',
-        cursor: 'pointer',
-      }}
+      style={{ ...cardStyle, borderRadius: '24px', cursor: 'pointer' }}
       onMouseEnter={(e) => {
         if (!isSelected) {
-          ;(e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px)'
-          ;(e.currentTarget as HTMLButtonElement).style.boxShadow =
-            '0 12px 32px rgba(23,24,28,0.10)'
+          e.currentTarget.style.transform = 'translateY(-3px)'
+          e.currentTarget.style.boxShadow = '0 12px 32px rgba(23,24,28,0.10)'
         }
       }}
       onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'
-        ;(e.currentTarget as HTMLButtonElement).style.boxShadow = 'none'
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.boxShadow = 'none'
       }}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p
-            className="font-medium uppercase"
-            style={{
-              fontSize: '10px',
-              letterSpacing: '0.14em',
-              color: 'rgba(23,24,28,0.4)',
-            }}
-          >
+          <p className="font-medium uppercase" style={{ fontSize: '10px', letterSpacing: '0.14em', color: 'rgba(23,24,28,0.4)' }}>
             Vinyl Banner
           </p>
-          <h2
-            className="mt-1.5 font-bold"
-            style={{ fontSize: '28px', letterSpacing: '-0.03em', color: '#17181c' }}
-          >
+          <h2 className="mt-1.5 font-bold" style={{ fontSize: '28px', letterSpacing: '-0.03em', color: '#17181c' }}>
             {sizeLabel}
           </h2>
         </div>
 
         {isMostPopular ? (
-          <span
-            className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase"
-            style={{
-              letterSpacing: '0.1em',
-              backgroundColor: '#c40036',
-              color: '#fff',
-            }}
-          >
+          <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase" style={{ letterSpacing: '0.1em', backgroundColor: '#c40036', color: '#fff' }}>
             Popular
           </span>
         ) : isBestValue ? (
-          <span
-            className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase"
-            style={{
-              letterSpacing: '0.1em',
-              backgroundColor: 'rgba(244,195,61,0.15)',
-              color: '#8b6800',
-              border: '1px solid rgba(244,195,61,0.5)',
-            }}
-          >
+          <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase" style={{ letterSpacing: '0.1em', backgroundColor: 'rgba(244,195,61,0.15)', color: '#8b6800', border: '1px solid rgba(244,195,61,0.5)' }}>
             Best Value
           </span>
         ) : null}
@@ -586,37 +490,21 @@ function ProductCard({
 
       <div
         className="mt-5 flex items-end justify-center pb-6"
-        style={{
-          height: '220px',
-          backgroundColor: '#17181c',
-          borderRadius: '16px',
-        }}
+        style={{ height: '220px', backgroundColor: '#17181c', borderRadius: '16px' }}
       >
         <div className="flex flex-col items-center gap-3">
           <div style={bannerStyle} />
-          <span
-            style={{
-              fontSize: '11px',
-              color: 'rgba(255,255,255,0.3)',
-              letterSpacing: '0.05em',
-            }}
-          >
-            {dimLabel}
+          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.05em' }}>
+            {product.width_in} × {product.height_in}
           </span>
         </div>
       </div>
 
-      <p
-        className="mt-6 font-extrabold"
-        style={{ fontSize: '56px', letterSpacing: '-0.04em', color: '#17181c', lineHeight: 1 }}
-      >
+      <p className="mt-6 font-extrabold" style={{ fontSize: '56px', letterSpacing: '-0.04em', color: '#17181c', lineHeight: 1 }}>
         ${price}
       </p>
 
-      <p
-        className="mt-2 flex-grow leading-relaxed"
-        style={{ fontSize: '15px', color: 'rgba(23,24,28,0.6)', minHeight: '44px' }}
-      >
+      <p className="mt-2 flex-grow leading-relaxed" style={{ fontSize: '15px', color: 'rgba(23,24,28,0.6)', minHeight: '44px' }}>
         {isMostPopular
           ? 'Best for events, booths, and all-around visibility.'
           : isBestValue
@@ -626,24 +514,13 @@ function ProductCard({
 
       <div
         className="mt-6 inline-flex w-full items-center justify-center gap-2 font-semibold text-white transition-all duration-200"
-        style={{
-          height: '50px',
-          borderRadius: '999px',
-          backgroundColor: isSelected ? '#c40036' : '#17181c',
-          fontSize: '15px',
-        }}
+        style={{ height: '50px', borderRadius: '999px', backgroundColor: isSelected ? '#c40036' : '#17181c', fontSize: '15px' }}
       >
         {isSelected ? (
           <>
             Selected
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-              <path
-                d="M2 7l3.5 3.5 6.5-7"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <path d="M2 7l3.5 3.5 6.5-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </>
         ) : (
@@ -661,26 +538,24 @@ function ProductCard({
 function UploadSection({
   selectedProduct,
   onFileStateChange,
+  onContinue,
 }: {
   selectedProduct: Pick<Product, 'id' | 'name' | 'width_in' | 'height_in' | 'price_cents'>
   onFileStateChange: (hasFile: boolean) => void
+  onContinue: () => void
 }) {
   const [fileState, setFileState] = useState<FileState | null>(null)
   const [sizeError, setSizeError] = useState<string | null>(null)
-  const [checkoutState, setCheckoutState] = useState<CheckoutState>('idle')
-  // File name from previous session — cleared once a new file is selected
   const [resumeHint, setResumeHint] = useState<string | null>(null)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const activePreviewUrl = useRef<string | null>(null)
-  const imgLoadRef = useRef<HTMLImageElement | null>(null)
+  const activeImg = useRef<HTMLImageElement | null>(null)
 
-  // Notify parent whenever file presence changes
   useEffect(() => {
     onFileStateChange(fileState !== null)
   }, [fileState, onFileStateChange])
 
-  // Check sessionStorage for a prior draft on this product
   useEffect(() => {
     const saved = loadResumeDraft()
     if (saved && saved.productId === selectedProduct.id) {
@@ -688,18 +563,27 @@ function UploadSection({
     }
   }, [selectedProduct.id])
 
-  // Revoke object URL and cancel in-flight image load on unmount
+  // Auto-load file carried over from the landing page
+  useEffect(() => {
+    const pending = getPendingFile()
+    if (pending) {
+      clearPendingFile()
+      processFile(pending)
+    }
+    // processFile is stable for the lifetime of this mount (keyed by selectedProduct.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     return () => {
       if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current)
-      if (imgLoadRef.current) {
-        imgLoadRef.current.onload = null
-        imgLoadRef.current.onerror = null
+      if (activeImg.current) {
+        activeImg.current.onload = null
+        activeImg.current.onerror = null
       }
     }
   }, [])
 
-  // Persist draft metadata once validation resolves
   const orderDraft: OrderDraft | null = useMemo(
     () =>
       fileState?.validation != null
@@ -724,71 +608,62 @@ function UploadSection({
     }
   }, [orderDraft])
 
-  function openFilePicker() {
-    inputRef.current?.click()
-  }
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const selected = e.target.files?.[0]
-    if (inputRef.current) inputRef.current.value = ''
-    if (!selected) return
-
+  function processFile(file: File) {
+    // Cancel any in-flight image load
+    if (activeImg.current) {
+      activeImg.current.onload = null
+      activeImg.current.onerror = null
+      activeImg.current = null
+    }
     if (activePreviewUrl.current) {
       URL.revokeObjectURL(activePreviewUrl.current)
       activePreviewUrl.current = null
     }
-    if (imgLoadRef.current) {
-      imgLoadRef.current.onload = null
-      imgLoadRef.current.onerror = null
-      imgLoadRef.current = null
-    }
 
     setSizeError(null)
     setResumeHint(null)
-    setCheckoutState('idle')
 
-    const sizeErr = getFileSizeError(selected)
+    const sizeErr = getFileSizeError(file)
     if (sizeErr) {
       setSizeError(sizeErr)
       setFileState(null)
       return
     }
 
-    if (selected.type.startsWith('image/')) {
-      const url = URL.createObjectURL(selected)
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file)
       activePreviewUrl.current = url
-      setFileState({ file: selected, previewUrl: url, validation: null })
+      setFileState({ file, previewUrl: url, validation: null })
 
       const img = new Image()
-      imgLoadRef.current = img
+      activeImg.current = img
 
       img.onload = () => {
-        if (imgLoadRef.current !== img) return
-        const result = validateImageDpi(img.width, img.height, selectedProduct)
+        activeImg.current = null
+        const result = validateImageDpi(img.naturalWidth, img.naturalHeight, selectedProduct)
         setFileState((prev) => (prev ? { ...prev, validation: result } : prev))
-        imgLoadRef.current = null
       }
 
       img.onerror = () => {
-        if (imgLoadRef.current !== img) return
+        activeImg.current = null
         setFileState((prev) =>
           prev
-            ? {
-                ...prev,
-                validation: {
-                  status: 'bad',
-                  message: 'Could not read image dimensions. Please try another file.',
-                },
-              }
+            ? { ...prev, validation: { status: 'bad', message: 'Could not read image dimensions. Please try another file.' } }
             : prev,
         )
-        imgLoadRef.current = null
       }
 
       img.src = url
     } else {
-      setFileState({ file: selected, previewUrl: null, validation: validatePdf() })
+      setFileState({ file, previewUrl: null, validation: validatePdf() })
     }
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = e.target.files?.[0]
+    if (inputRef.current) inputRef.current.value = ''
+    if (!selected) return
+    processFile(selected)
   }
 
   function handleRemove() {
@@ -796,63 +671,28 @@ function UploadSection({
       URL.revokeObjectURL(activePreviewUrl.current)
       activePreviewUrl.current = null
     }
-    if (imgLoadRef.current) {
-      imgLoadRef.current.onload = null
-      imgLoadRef.current.onerror = null
-      imgLoadRef.current = null
+    if (activeImg.current) {
+      activeImg.current.onload = null
+      activeImg.current.onerror = null
+      activeImg.current = null
     }
     setFileState(null)
     setSizeError(null)
-    setCheckoutState('idle')
     setResumeHint(null)
     clearResumeDraft()
   }
 
-  async function handleCheckout() {
-    if (!CHECKOUT_ENABLED || !orderDraft || !fileState) return
-    setCheckoutState('submitting')
-
-    try {
-      // ── Step 1: Upload file to Supabase Storage ──────────────────────────
-      // const { data: upload, error: uploadError } = await supabase.storage
-      //   .from('designs')
-      //   .upload(`orders/${crypto.randomUUID()}/${fileState.file.name}`, fileState.file)
-      // if (uploadError) throw uploadError
-
-      // ── Step 2: Create design record ─────────────────────────────────────
-      // const { data: design, error: designError } = await supabase
-      //   .from('designs')
-      //   .insert({ product_id: orderDraft.product.id, storage_path: upload.path, ... })
-      //   .select()
-      //   .single()
-      // if (designError) throw designError
-
-      // ── Step 3: Create Stripe checkout session via route handler ─────────
-      // const res = await fetch('/api/checkout', {
-      //   method: 'POST',
-      //   body: JSON.stringify({ designId: design.id }),
-      // })
-      // if (!res.ok) throw new Error('Failed to create checkout session')
-      // const { url } = await res.json()
-      // router.push(url)
-    } catch {
-      setCheckoutState('error')
-    }
+  function openFilePicker() {
+    inputRef.current?.click()
   }
 
   return (
     <section className="mt-16">
       <div className="max-w-3xl">
-        <p
-          className="text-xs font-semibold uppercase"
-          style={{ letterSpacing: '0.16em', color: '#c40036' }}
-        >
+        <p className="text-xs font-semibold uppercase" style={{ letterSpacing: '0.16em', color: '#c40036' }}>
           Step 02
         </p>
-        <h2
-          className="mt-3 font-bold"
-          style={{ fontSize: '36px', letterSpacing: '-0.03em', color: '#17181c' }}
-        >
+        <h2 className="mt-3 font-bold" style={{ fontSize: '36px', letterSpacing: '-0.03em', color: '#17181c' }}>
           Upload your design for {selectedProduct.width_in} × {selectedProduct.height_in} in
         </h2>
         <p className="mt-3 leading-7" style={{ fontSize: '16px', color: 'rgba(23,24,28,0.55)' }}>
@@ -872,10 +712,7 @@ function UploadSection({
 
       <div
         className="mt-8 rounded-[20px] bg-white text-center transition-colors duration-150"
-        style={{
-          border: '2px dashed rgba(196,0,54,0.25)',
-          padding: '48px 32px',
-        }}
+        style={{ border: '2px dashed rgba(196,0,54,0.25)', padding: '48px 32px' }}
         onDragOver={(e) => {
           e.preventDefault()
           e.currentTarget.style.borderColor = '#c40036'
@@ -891,18 +728,13 @@ function UploadSection({
           e.currentTarget.style.backgroundColor = '#ffffff'
           const dropped = e.dataTransfer.files?.[0]
           if (!dropped) return
-          const synth = { target: { files: e.dataTransfer.files, value: '' } } as unknown as React.ChangeEvent<HTMLInputElement>
-          handleFileChange(synth)
+          processFile(dropped)
         }}
       >
         {fileState === null ? (
           <EmptyUpload onChoose={openFilePicker} sizeError={sizeError} resumeHint={resumeHint} />
         ) : (
-          <FilePreview
-            fileState={fileState}
-            onRemove={handleRemove}
-            onReplace={openFilePicker}
-          />
+          <FilePreview fileState={fileState} onRemove={handleRemove} onReplace={openFilePicker} />
         )}
       </div>
 
@@ -910,9 +742,7 @@ function UploadSection({
         <OrderSummary
           draft={orderDraft}
           delivery={STANDARD_DELIVERY}
-          checkoutState={checkoutState}
-          checkoutEnabled={CHECKOUT_ENABLED}
-          onCheckout={handleCheckout}
+          onContinue={onContinue}
         />
       )}
     </section>
@@ -936,27 +766,11 @@ function EmptyUpload({
     <div className="flex flex-col items-center">
       <div
         className="flex items-center justify-center rounded-full"
-        style={{
-          width: '56px',
-          height: '56px',
-          backgroundColor: 'rgba(196,0,54,0.08)',
-          color: '#c40036',
-        }}
+        style={{ width: '56px', height: '56px', backgroundColor: 'rgba(196,0,54,0.08)', color: '#c40036' }}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M12 16V8m0 0-3 3m3-3 3 3"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M3 16v1a4 4 0 0 0 4 4h10a4 4 0 0 0 4-4v-1"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-          />
+          <path d="M12 16V8m0 0-3 3m3-3 3 3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 16v1a4 4 0 0 0 4 4h10a4 4 0 0 0 4-4v-1" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
         </svg>
       </div>
 
@@ -989,14 +803,7 @@ function EmptyUpload({
           — upload it again to continue.
         </p>
       ) : (
-        <p
-          className="mt-3 uppercase"
-          style={{
-            fontSize: '11px',
-            letterSpacing: '0.12em',
-            color: 'rgba(23,24,28,0.35)',
-          }}
-        >
+        <p className="mt-3 uppercase" style={{ fontSize: '11px', letterSpacing: '0.12em', color: 'rgba(23,24,28,0.35)' }}>
           PNG · JPG · PDF · Max {FILE_SIZE_LIMIT_MB} MB
         </p>
       )}
@@ -1021,10 +828,7 @@ function FilePreview({
 
   return (
     <div className="flex flex-col items-center">
-      <p
-        className="text-xs font-semibold uppercase"
-        style={{ letterSpacing: '0.14em', color: 'rgba(23,24,28,0.4)' }}
-      >
+      <p className="text-xs font-semibold uppercase" style={{ letterSpacing: '0.14em', color: 'rgba(23,24,28,0.4)' }}>
         File Selected
       </p>
       <p className="mt-2 break-all font-semibold" style={{ fontSize: '18px', color: '#17181c' }}>
@@ -1037,10 +841,7 @@ function FilePreview({
       {previewUrl ? (
         <div
           className="mt-6 overflow-hidden rounded-xl p-3"
-          style={{
-            border: '1px solid rgba(23,24,28,0.08)',
-            backgroundColor: 'rgba(23,24,28,0.04)',
-          }}
+          style={{ border: '1px solid rgba(23,24,28,0.08)', backgroundColor: 'rgba(23,24,28,0.04)' }}
         >
           <img
             src={previewUrl}
@@ -1052,11 +853,7 @@ function FilePreview({
       ) : (
         <div
           className="mt-6 rounded-xl px-6 py-8 text-sm"
-          style={{
-            border: '1px solid rgba(23,24,28,0.08)',
-            backgroundColor: 'rgba(23,24,28,0.04)',
-            color: 'rgba(23,24,28,0.55)',
-          }}
+          style={{ border: '1px solid rgba(23,24,28,0.08)', backgroundColor: 'rgba(23,24,28,0.04)', color: 'rgba(23,24,28,0.55)' }}
         >
           PDF selected. Preview coming in the next step.
         </div>
@@ -1071,20 +868,10 @@ function FilePreview({
       )}
 
       <div className="mt-6 flex gap-6">
-        <button
-          type="button"
-          onClick={onReplace}
-          className="text-sm font-medium transition hover:opacity-70"
-          style={{ color: 'rgba(23,24,28,0.55)' }}
-        >
+        <button type="button" onClick={onReplace} className="text-sm font-medium transition hover:opacity-70" style={{ color: 'rgba(23,24,28,0.55)' }}>
           Replace file
         </button>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-sm font-medium transition hover:opacity-70"
-          style={{ color: '#c40036' }}
-        >
+        <button type="button" onClick={onRemove} className="text-sm font-medium transition hover:opacity-70" style={{ color: '#c40036' }}>
           Remove file
         </button>
       </div>
@@ -1099,26 +886,13 @@ function FilePreview({
 function ValidationBadge({ validation }: { validation: ValidationResult }) {
   const styles: React.CSSProperties =
     validation.status === 'good'
-      ? {
-          borderColor: 'rgba(23,193,206,0.35)',
-          backgroundColor: 'rgba(23,193,206,0.08)',
-        }
+      ? { borderColor: 'rgba(23,193,206,0.35)', backgroundColor: 'rgba(23,193,206,0.08)' }
       : validation.status === 'warn'
-      ? {
-          borderColor: 'rgba(244,195,61,0.4)',
-          backgroundColor: 'rgba(244,195,61,0.08)',
-        }
-      : {
-          borderColor: 'rgba(196,0,54,0.3)',
-          backgroundColor: 'rgba(196,0,54,0.06)',
-        }
+      ? { borderColor: 'rgba(244,195,61,0.4)', backgroundColor: 'rgba(244,195,61,0.08)' }
+      : { borderColor: 'rgba(196,0,54,0.3)', backgroundColor: 'rgba(196,0,54,0.06)' }
 
   const titleColor =
-    validation.status === 'good'
-      ? '#0e8a94'
-      : validation.status === 'warn'
-      ? '#8b6800'
-      : '#c40036'
+    validation.status === 'good' ? '#0e8a94' : validation.status === 'warn' ? '#8b6800' : '#c40036'
 
   return (
     <div
@@ -1130,13 +904,11 @@ function ValidationBadge({ validation }: { validation: ValidationResult }) {
       <p className="text-sm font-semibold" style={{ color: titleColor }}>
         {validation.message}
       </p>
-
       {validation.recommendation && (
         <p className="mt-1 text-sm" style={{ color: 'rgba(23,24,28,0.6)' }}>
           {validation.recommendation}
         </p>
       )}
-
       {validation.payoff && (
         <p className="mt-2 text-sm font-medium" style={{ color: 'rgba(23,24,28,0.75)' }}>
           {validation.payoff}
@@ -1159,72 +931,42 @@ const QUALITY_LABELS: Record<ValidationStatus, string> = {
 function OrderSummary({
   draft,
   delivery,
-  checkoutState,
-  checkoutEnabled,
-  onCheckout,
+  onContinue,
 }: {
   draft: OrderDraft
   delivery: DeliveryEstimate
-  checkoutState: CheckoutState
-  checkoutEnabled: boolean
-  onCheckout: () => void
+  onContinue: () => void
 }) {
   const { product, fileName, validation } = draft
-
   const blocked = validation.status === 'bad'
-  const submitting = checkoutState === 'submitting'
-  const ctaDisabled = !checkoutEnabled || blocked || submitting
 
   return (
-    <div
-      className="mt-8 rounded-3xl p-10"
-      style={{ backgroundColor: '#17181c' }}
-    >
-      <p
-        className="text-xs font-semibold uppercase"
-        style={{ letterSpacing: '0.16em', color: '#c40036' }}
-      >
+    <div className="mt-8 rounded-3xl p-10" style={{ backgroundColor: '#17181c' }}>
+      <p className="text-xs font-semibold uppercase" style={{ letterSpacing: '0.16em', color: '#c40036' }}>
         Step 03
       </p>
-      <h3
-        className="mt-2 font-bold text-white"
-        style={{ fontSize: '28px', letterSpacing: '-0.02em' }}
-      >
+      <h3 className="mt-2 font-bold text-white" style={{ fontSize: '28px', letterSpacing: '-0.02em' }}>
         Order Summary
       </h3>
 
       <div className="mt-6" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
         <SummaryRow label="Banner">
-          <span className="font-semibold text-white">
-            {product.width_in} × {product.height_in} in
-          </span>
-          <span className="ml-3" style={{ color: 'rgba(255,255,255,0.5)' }}>
-            Vinyl Banner
-          </span>
+          <span className="font-semibold text-white">{product.width_in} × {product.height_in} in</span>
+          <span className="ml-3" style={{ color: 'rgba(255,255,255,0.5)' }}>Vinyl Banner</span>
         </SummaryRow>
-
         <SummaryRow label="Price">
-          <span className="font-bold text-white" style={{ fontSize: '20px' }}>
-            {formatPrice(product.price_cents)}
-          </span>
+          <span className="font-bold text-white" style={{ fontSize: '20px' }}>{formatPrice(product.price_cents)}</span>
         </SummaryRow>
-
         <SummaryRow label="File">
-          <span className="max-w-xs truncate font-medium text-white" title={fileName}>
-            {fileName}
-          </span>
+          <span className="max-w-xs truncate font-medium text-white" title={fileName}>{fileName}</span>
         </SummaryRow>
-
         <SummaryRow label="Quality">
           <QualityIndicator status={validation.status} />
         </SummaryRow>
-
         <SummaryRow label="Delivery">
           <span className="font-medium text-white">{delivery.range}</span>
           {delivery.note && (
-            <span className="ml-2 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-              {delivery.note}
-            </span>
+            <span className="ml-2 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>{delivery.note}</span>
           )}
         </SummaryRow>
       </div>
@@ -1236,61 +978,29 @@ function OrderSummary({
           </p>
         )}
 
-        {checkoutState === 'error' && (
-          <p className="mb-4 text-sm font-medium" style={{ color: '#c40036' }} role="alert">
-            Something went wrong. Please try again.
-          </p>
-        )}
-
-        {!checkoutEnabled && (
-          <p
-            className="mb-4 rounded-xl px-4 py-3 text-sm"
-            style={{
-              border: '1px solid rgba(255,255,255,0.10)',
-              backgroundColor: 'rgba(255,255,255,0.05)',
-              color: 'rgba(255,255,255,0.5)',
-            }}
-          >
-            Checkout is not yet available — backend integration in progress.
-          </p>
-        )}
-
         <button
           type="button"
-          onClick={onCheckout}
-          disabled={ctaDisabled}
-          aria-disabled={ctaDisabled}
+          onClick={blocked ? undefined : onContinue}
+          disabled={blocked}
+          aria-disabled={blocked}
           className="inline-flex w-full items-center justify-center gap-2 rounded-full font-semibold text-white transition hover:opacity-90"
           style={{
             height: '56px',
             fontSize: '16px',
-            backgroundColor: ctaDisabled ? 'rgba(255,255,255,0.10)' : '#c40036',
-            color: ctaDisabled ? 'rgba(255,255,255,0.30)' : '#ffffff',
-            cursor: ctaDisabled ? 'not-allowed' : 'pointer',
+            backgroundColor: blocked ? 'rgba(255,255,255,0.10)' : '#c40036',
+            color: blocked ? 'rgba(255,255,255,0.30)' : '#ffffff',
+            cursor: blocked ? 'not-allowed' : 'pointer',
           }}
         >
-          {submitting ? (
-            'Processing...'
-          ) : (
-            <>
-              Continue to Checkout
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <path
-                  d="M3 8h10m0 0-3.5-3.5M13 8l-3.5 3.5"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </>
+          Continue to Checkout
+          {!blocked && (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path d="M3 8h10m0 0-3.5-3.5M13 8l-3.5 3.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           )}
         </button>
 
-        <p
-          className="mt-3 text-center text-xs"
-          style={{ color: 'rgba(255,255,255,0.35)' }}
-        >
+        <p className="mt-3 text-center text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
           You won&apos;t be charged until the next step.
         </p>
       </div>
@@ -1299,40 +1009,23 @@ function OrderSummary({
 }
 
 // ---------------------------------------------------------------------------
-// SummaryRow
+// SummaryRow / QualityIndicator
 // ---------------------------------------------------------------------------
 
 function SummaryRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div
-      className="flex items-baseline justify-between gap-4 py-4"
-      style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
-    >
-      <span className="shrink-0 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-        {label}
-      </span>
-      <span className="flex flex-wrap items-baseline justify-end gap-1 text-right text-sm">
-        {children}
-      </span>
+    <div className="flex items-baseline justify-between gap-4 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      <span className="shrink-0 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>{label}</span>
+      <span className="flex flex-wrap items-baseline justify-end gap-1 text-right text-sm">{children}</span>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// QualityIndicator
-// ---------------------------------------------------------------------------
-
 function QualityIndicator({ status }: { status: ValidationStatus }) {
-  const dotColor =
-    status === 'good' ? '#17c1ce' : status === 'warn' ? '#f4c33d' : '#c40036'
-
+  const dotColor = status === 'good' ? '#17c1ce' : status === 'warn' ? '#f4c33d' : '#c40036'
   return (
     <span className="flex items-center gap-2">
-      <span
-        className="inline-block h-2 w-2 shrink-0 rounded-full"
-        style={{ backgroundColor: dotColor }}
-        aria-hidden
-      />
+      <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dotColor }} aria-hidden />
       <span className="font-medium text-white">{QUALITY_LABELS[status]}</span>
     </span>
   )
