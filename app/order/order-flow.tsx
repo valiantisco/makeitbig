@@ -1,25 +1,24 @@
 'use client'
 
-import { useEffect, useRef, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, CSSProperties, DragEvent, ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type Product = {
-  id: string
-  name: string
-  width_in: number
-  height_in: number
-  material: string
-  finish: string
-  price_cents: number
-  cost_cents: number | null
-  active: boolean
-}
+import {
+  cx,
+  formatFileSize,
+  formatPrice,
+  getProductFormatLabel,
+  getProductInchLabel,
+  getProductPrintDimensions,
+  getProductSizeLabel,
+  getProductTier,
+  getProductUse,
+  getRecommendedProduct,
+  type PrintOrientation,
+} from '@/lib/banner-config'
+import type { Product } from '@/lib/products'
 
 type ValidationStatus = 'good' | 'warn' | 'bad'
 
@@ -33,6 +32,7 @@ export type ValidationResult = {
 
 export type OrderDraft = {
   product: Pick<Product, 'id' | 'name' | 'width_in' | 'height_in' | 'price_cents'>
+  orientation: PrintOrientation
   fileName: string
   fileSizeBytes: number
   fileType: string
@@ -45,16 +45,16 @@ type FileState = {
   validation: ValidationResult | null
 }
 
-type CheckoutState = 'idle' | 'submitting' | 'error'
+type CheckoutState = 'idle' | 'submitting'
 
 type DeliveryEstimate = {
   range: string
   note?: string
 }
 
-// Serializable subset saved to sessionStorage for refresh continuity
 type ResumeDraft = {
   productId: string
+  orientation: PrintOrientation
   fileName: string
   fileType: string
 }
@@ -63,36 +63,24 @@ type OrderFlowProps = {
   products: Product[]
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 const FILE_SIZE_LIMIT_MB = 50
-const DPI_GOOD = 150
-const DPI_WARN = 100
+const RESUME_DRAFT_KEY = 'mib_resume_draft'
 
 const STANDARD_DELIVERY: DeliveryEstimate = {
-  range: '5–7 business days',
+  range: 'Ships in 3-5 days',
   note: 'After file approval',
 }
 
 /**
  * Flip to true once Supabase Storage upload + Stripe session are wired.
- * Controls whether the checkout CTA is active or shows a dev placeholder.
  */
 const CHECKOUT_ENABLED = false
-
-const RESUME_DRAFT_KEY = 'mib_resume_draft'
-
-// ---------------------------------------------------------------------------
-// Session storage helpers
-// ---------------------------------------------------------------------------
 
 function saveResumeDraft(draft: ResumeDraft): void {
   try {
     sessionStorage.setItem(RESUME_DRAFT_KEY, JSON.stringify(draft))
   } catch {
-    // sessionStorage may be unavailable (private mode, storage full)
+    // sessionStorage may be unavailable in private mode.
   }
 }
 
@@ -109,89 +97,70 @@ function loadResumeDraft(): ResumeDraft | null {
 function clearResumeDraft(): void {
   try {
     sessionStorage.removeItem(RESUME_DRAFT_KEY)
-  } catch { }
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
+function getPpiThresholds(product: Pick<Product, 'width_in' | 'height_in'>) {
+  const longIn = Math.max(product.width_in, product.height_in)
+  if (longIn >= 100) return { good: 60, warn: 38 }
+  if (longIn >= 72) return { good: 72, warn: 48 }
+  return { good: 100, warn: 70 }
+}
 
-/**
- * Returns plain-language context for how a banner this size is typically viewed.
- * Used to make validation messages meaningful relative to the actual product.
- */
-function getViewingContext(product: Pick<Product, 'width_in' | 'height_in'>): {
-  distance: string
-  closeness: 'close' | 'medium' | 'far'
-} {
-  const sqIn = product.width_in * product.height_in
-  // 24×36 = 864 sq in → close-up reading distance
-  // 36×72 = 2592 sq in → mid-range viewing
-  // 48×96 = 4608 sq in → large format, viewed from a distance
-  if (sqIn <= 900) return { distance: 'up close', closeness: 'close' }
-  if (sqIn <= 2700) return { distance: 'a few feet away', closeness: 'medium' }
-  return { distance: '10+ feet away', closeness: 'far' }
+function getViewingDistance(product: Pick<Product, 'width_in' | 'height_in'>) {
+  const longIn = Math.max(product.width_in, product.height_in)
+  if (longIn >= 100) return 'from across a room'
+  if (longIn >= 72) return 'from a few feet away'
+  return 'up close'
 }
 
 function validateImageDpi(
   imgWidth: number,
   imgHeight: number,
   product: Pick<Product, 'width_in' | 'height_in'>,
+  orientation: PrintOrientation,
 ): ValidationResult {
-  const dpi = Math.min(imgWidth / product.width_in, imgHeight / product.height_in)
-  const roundedDpi = Math.round(dpi)
-  const { distance, closeness } = getViewingContext(product)
-  const sizeLabel = `${product.width_in}×${product.height_in} in`
+  const printDimensions = getProductPrintDimensions(product, orientation)
+  const ppi = Math.min(imgWidth / printDimensions.widthIn, imgHeight / printDimensions.heightIn)
+  const roundedPpi = Math.round(ppi)
+  const thresholds = getPpiThresholds(product)
+  const formatLabel = getProductFormatLabel(product, orientation)
+  const distance = getViewingDistance(product)
 
-  if (dpi >= DPI_GOOD) {
+  if (ppi >= thresholds.good) {
     return {
       status: 'good',
-      message: `Looking sharp — ${roundedDpi} DPI for a ${sizeLabel} banner.`,
-      payoff:
-        closeness === 'close'
-          ? 'Great resolution for a banner this size. It will look crisp up close.'
-          : 'More than enough quality for this size. This is going to look great.',
-      dpi: roundedDpi,
+      message: `Ready for ${formatLabel}.`,
+      payoff: `${roundedPpi} effective PPI should hold up ${distance}.`,
+      dpi: roundedPpi,
     }
   }
 
-  if (dpi >= DPI_WARN) {
-    const recommendation =
-      closeness === 'close'
-        ? `This banner is read ${distance} — a higher resolution file will look noticeably sharper.`
-        : closeness === 'medium'
-          ? `This banner is viewed ${distance}. It will print acceptably, but a sharper file is better.`
-          : `Large banners are viewed ${distance}, so ${roundedDpi} DPI will likely print fine.`
-
+  if (ppi >= thresholds.warn) {
     return {
       status: 'warn',
-      message: `${roundedDpi} DPI — may look slightly soft at ${sizeLabel}.`,
-      recommendation,
-      payoff: closeness === 'far' ? 'From a distance, this will still look great.' : undefined,
-      dpi: roundedDpi,
+      message: `Usable, but detail may soften at ${formatLabel}.`,
+      recommendation: 'Best for simple designs, photos, and bold type. Use a higher-res file for small text.',
+      payoff: `${roundedPpi} effective PPI is workable for banners viewed ${distance}.`,
+      dpi: roundedPpi,
     }
   }
-
-  const recommendation =
-    closeness === 'close'
-      ? `This banner is read ${distance} and needs at least ${DPI_WARN} DPI to print clearly. Try a higher resolution export or choose a smaller size.`
-      : closeness === 'medium'
-        ? `For a ${sizeLabel} banner, aim for at least ${DPI_WARN} DPI. Consider a smaller size or a higher resolution file.`
-        : `Even for a large banner viewed ${distance}, ${roundedDpi} DPI may show noticeable softness. A higher resolution file will give better results.`
 
   return {
     status: 'bad',
-    message: `${roundedDpi} DPI is too low for a ${sizeLabel} banner.`,
-    recommendation,
-    dpi: roundedDpi,
+    message: `Too small for ${formatLabel}.`,
+    recommendation: 'Upload a higher-resolution file or choose a smaller banner before checkout.',
+    dpi: roundedPpi,
   }
 }
 
-function validatePdf(): ValidationResult {
+function validatePdf(product: Pick<Product, 'width_in' | 'height_in'>, orientation: PrintOrientation): ValidationResult {
   return {
     status: 'warn',
-    message: "PDF received — we'll verify quality after upload.",
-    payoff: 'PDFs typically print well. We check them manually before production.',
+    message: `PDF ready for manual check at ${getProductFormatLabel(product, orientation)}.`,
+    payoff: 'PDFs often print well. We verify the file before production.',
   }
 }
 
@@ -202,49 +171,69 @@ function getFileSizeError(file: File): string | null {
   return null
 }
 
-function formatPrice(cents: number): string {
-  return `$${(cents / 100).toFixed(0)}`
-}
+function getCardPreviewStyle(product: Pick<Product, 'width_in' | 'height_in'>, orientation: PrintOrientation) {
+  const { widthIn, heightIn } = getProductPrintDimensions(product, orientation)
+  const aspect = widthIn / heightIn
+  const width = orientation === 'horizontal'
+    ? Math.min(190, Math.max(126, 92 * aspect))
+    : Math.min(94, Math.max(56, 118 / aspect))
+  const height = orientation === 'horizontal'
+    ? Math.min(82, Math.max(50, 118 / aspect))
+    : Math.min(132, Math.max(86, 96 * aspect))
 
-// ---------------------------------------------------------------------------
-// OrderFlow
-// ---------------------------------------------------------------------------
+  return {
+    '--mib-card-shape-w': `${width}px`,
+    '--mib-card-shape-h': `${height}px`,
+  } as CSSProperties
+}
 
 export default function OrderFlow({ products }: OrderFlowProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
   const selectedId = searchParams.get('size')
+  const orientationParam = searchParams.get('orientation')
+  const selectedOrientation: PrintOrientation = orientationParam === 'vertical' ? 'vertical' : 'horizontal'
 
-  const selectedProduct = useMemo(
-    () => products.find((p) => p.id === selectedId) ?? null,
-    [products, selectedId],
-  )
+  const selectedProduct = useMemo(() => {
+    return products.find((product) => product.id === selectedId) ?? getRecommendedProduct(products)
+  }, [products, selectedId])
 
-  // Whether the upload section currently has an active file
   const [hasActiveFile, setHasActiveFile] = useState(false)
-  // A size the user clicked while a file was active — awaiting confirmation
   const [pendingProductId, setPendingProductId] = useState<string | null>(null)
 
   const pendingProduct = useMemo(
-    () => (pendingProductId ? products.find((p) => p.id === pendingProductId) ?? null : null),
+    () => (pendingProductId ? products.find((product) => product.id === pendingProductId) ?? null : null),
     [products, pendingProductId],
   )
 
-  function commitSizeChange(productId: string) {
+  function replaceQuery(nextSizeId: string | null, nextOrientation: PrintOrientation) {
     const params = new URLSearchParams(searchParams.toString())
-    params.set('size', productId)
+    if (nextSizeId) params.set('size', nextSizeId)
+    params.set('orientation', nextOrientation)
     router.replace(`/order?${params.toString()}`, { scroll: false })
   }
 
+  function commitSizeChange(productId: string) {
+    replaceQuery(productId, selectedOrientation)
+  }
+
   function handleSelect(productId: string) {
-    if (productId === selectedId) return
+    if (productId === selectedProduct?.id) return
     if (hasActiveFile) {
-      // Intercept — ask for confirmation before clearing file state
       setPendingProductId(productId)
       return
     }
     commitSizeChange(productId)
+  }
+
+  function handleOrientationChange(nextOrientation: PrintOrientation) {
+    if (nextOrientation === selectedOrientation) return
+    if (hasActiveFile) {
+      setHasActiveFile(false)
+      clearResumeDraft()
+    }
+    replaceQuery(selectedProduct?.id ?? null, nextOrientation)
   }
 
   function handleConfirmSizeChange() {
@@ -261,100 +250,103 @@ export default function OrderFlow({ products }: OrderFlowProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f3f1ed]">
-      <nav
-        style={{ backgroundColor: 'rgba(196, 0, 54, 0.7)', backdropFilter: 'blur(6px)', position: 'sticky', top: 0, zIndex: 50 }}
-        className="flex h-[72px] items-center px-6"
-      >
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
-          <Link href="/" className="flex items-center">
+    <div className="mib-order">
+      <nav className="mib-nav mib-orderNav" aria-label="Order navigation">
+        <div className="mib-shell mib-nav__inner">
+          <Link href="/" className="mib-nav__logo" aria-label="MakeItBig home">
             <Image
               src="/mib-logo.svg"
               alt="MakeItBig"
               width={140}
               height={43}
+              priority
               style={{ filter: 'brightness(0) invert(1)' }}
             />
           </Link>
 
-          <div className="flex items-center gap-1">
-            <StepPill
-              number="01"
-              label="Size"
-              state={selectedProduct ? 'done' : 'active'}
-            />
-            <div className="h-px w-6 bg-white/20" />
+          <div className="mib-orderProgress" aria-label="Order progress">
+            <StepPill number="01" label="Size" state={selectedProduct ? 'done' : 'active'} />
+            <span className="mib-orderProgress__line" aria-hidden />
             <StepPill
               number="02"
               label="Upload"
-              state={
-                selectedProduct && hasActiveFile
-                  ? 'done'
-                  : selectedProduct
-                    ? 'active'
-                    : 'inactive'
-              }
+              state={selectedProduct && hasActiveFile ? 'done' : selectedProduct ? 'active' : 'inactive'}
             />
-            <div className="h-px w-6 bg-white/20" />
-            <StepPill
-              number="03"
-              label="Checkout"
-              state="inactive"
-            />
+            <span className="mib-orderProgress__line" aria-hidden />
+            <StepPill number="03" label="Review" state={hasActiveFile ? 'active' : 'inactive'} />
           </div>
         </div>
       </nav>
 
-      <main className="mx-auto max-w-6xl px-6 pt-14 pb-20">
-        <div className="max-w-3xl">
-          <p
-            className="text-xs font-semibold uppercase tracking-[0.16em]"
-            style={{ color: '#c40036' }}
-          >
-            Step 01
-          </p>
-          <h1
-            className="mt-3 font-bold"
-            style={{
-              fontSize: '52px',
-              letterSpacing: '-0.04em',
-              lineHeight: 1.05,
-              color: '#17181c',
-            }}
-          >
-            How big do you want to go?
+      <main className="mib-orderMain">
+        <section className="mib-shell mib-orderHero" aria-labelledby="order-title">
+          <p className="mib-orderEyebrow">Order your banner</p>
+          <h1 id="order-title" className="mib-orderTitle">
+            Pick the <span>right size</span>. Upload the file. We check the print.
           </h1>
-          <p
-            className="mt-4 leading-7"
-            style={{ fontSize: '18px', color: 'rgba(23,24,28,0.55)' }}
-          >
-            Pick your size. We&apos;ll handle the rest.
+          <p className="mib-orderIntro">
+            Choose a banner format, then send us your design. We preview the crop, check resolution,
+            and help you avoid bad prints before you buy.
           </p>
-        </div>
+        </section>
 
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              isSelected={selectedProduct?.id === product.id}
-              onSelect={handleSelect}
+        <section className="mib-shell mib-orderPanel" aria-labelledby="size-heading">
+          <div className="mib-orderPanel__head">
+            <div>
+              <span className="mib-orderStepLabel">Step 01</span>
+              <h2 id="size-heading" className="mib-orderPanel__title">Choose size and direction</h2>
+            </div>
+
+            <div className="mib-orderOrientation" aria-label="Choose banner orientation">
+              <button
+                type="button"
+                className={cx(
+                  'mib-orderOrientation__button',
+                  selectedOrientation === 'horizontal' && 'is-active',
+                )}
+                onClick={() => handleOrientationChange('horizontal')}
+              >
+                Horizontal
+              </button>
+              <button
+                type="button"
+                className={cx(
+                  'mib-orderOrientation__button',
+                  selectedOrientation === 'vertical' && 'is-active',
+                )}
+                onClick={() => handleOrientationChange('vertical')}
+              >
+                Vertical
+              </button>
+            </div>
+          </div>
+
+          <div className="mib-orderSizeGrid">
+            {products.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                orientation={selectedOrientation}
+                isSelected={selectedProduct?.id === product.id}
+                onSelect={handleSelect}
+              />
+            ))}
+          </div>
+
+          {pendingProduct !== null && (
+            <SizeChangeConfirmation
+              pendingProduct={pendingProduct}
+              onConfirm={handleConfirmSizeChange}
+              onCancel={handleCancelSizeChange}
             />
-          ))}
-        </div>
-
-        {pendingProduct !== null && (
-          <SizeChangeConfirmation
-            pendingProduct={pendingProduct}
-            onConfirm={handleConfirmSizeChange}
-            onCancel={handleCancelSizeChange}
-          />
-        )}
+          )}
+        </section>
 
         {selectedProduct !== null && pendingProduct === null && (
           <UploadSection
-            key={selectedProduct.id}
+            key={`${selectedProduct.id}-${selectedOrientation}`}
             selectedProduct={selectedProduct}
+            orientation={selectedOrientation}
             onFileStateChange={setHasActiveFile}
           />
         )}
@@ -372,40 +364,17 @@ function StepPill({
   label: string
   state: 'active' | 'done' | 'inactive'
 }) {
-  const base = 'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition'
-
-  if (state === 'active') {
-    return (
-      <span className={`${base} bg-white`} style={{ color: '#c40036' }}>
-        {number} {label}
-      </span>
-    )
-  }
-
-  if (state === 'done') {
-    return (
-      <span className={`${base}`} style={{ backgroundColor: 'rgba(255,255,255,0.4)', color: '#fff' }}>
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
-          <path d="M1.5 5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        {number} {label}
-      </span>
-    )
-  }
-
   return (
-    <span
-      className={`${base}`}
-      style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.5)' }}
-    >
-      {number} {label}
+    <span className={cx('mib-orderStepPill', `is-${state}`)}>
+      {state === 'done' && (
+        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+          <path d="M1.8 5.6 4.5 8.2 9.2 2.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      <span>{number}</span> {label}
     </span>
   )
 }
-
-// ---------------------------------------------------------------------------
-// SizeChangeConfirmation
-// ---------------------------------------------------------------------------
 
 function SizeChangeConfirmation({
   pendingProduct,
@@ -416,40 +385,17 @@ function SizeChangeConfirmation({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const sizeLabel = `${pendingProduct.width_in} × ${pendingProduct.height_in} in`
-
   return (
-    <div
-      className="mt-8 rounded-2xl bg-white px-6 py-6"
-      style={{
-        borderTop: '4px solid #f4c33d',
-        boxShadow: '0 1px 3px rgba(23,24,28,0.07)',
-      }}
-      role="alertdialog"
-      aria-label="Confirm size change"
-    >
-      <p className="text-sm font-semibold" style={{ color: '#17181c' }}>
-        Switch to {sizeLabel}?
-      </p>
-      <p className="mt-1 text-sm" style={{ color: 'rgba(23,24,28,0.55)' }}>
-        Your current file will be cleared and you&apos;ll need to re-upload it. Quality will be
-        re-checked against the new size.
-      </p>
-      <div className="mt-5 flex gap-3">
-        <button
-          type="button"
-          onClick={onConfirm}
-          className="rounded-full px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
-          style={{ backgroundColor: '#c40036' }}
-        >
+    <div className="mib-orderConfirm" role="alertdialog" aria-label="Confirm size change">
+      <div>
+        <strong>Switch to {getProductSizeLabel(pendingProduct)}?</strong>
+        <p>Your current upload will be cleared so we can re-check the file at the new size.</p>
+      </div>
+      <div className="mib-orderConfirm__actions">
+        <button type="button" className="mib-orderButton mib-orderButton--gradient" onClick={onConfirm}>
           Switch size
         </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-full px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
-          style={{ backgroundColor: '#17181c' }}
-        >
+        <button type="button" className="mib-orderButton mib-orderButton--dark" onClick={onCancel}>
           Keep current
         </button>
       </div>
@@ -457,238 +403,90 @@ function SizeChangeConfirmation({
   )
 }
 
-// ---------------------------------------------------------------------------
-// ProductCard
-// ---------------------------------------------------------------------------
-
 function ProductCard({
   product,
+  orientation,
   isSelected,
   onSelect,
 }: {
   product: Product
+  orientation: PrintOrientation
   isSelected: boolean
   onSelect: (id: string) => void
 }) {
-  const sizeLabel = `${product.width_in} × ${product.height_in} in`
-  const price = (product.price_cents / 100).toFixed(0)
-  const isMostPopular = product.width_in === 36 && product.height_in === 72
-  const isBestValue = product.width_in === 48 && product.height_in === 96
-
-  const bannerStyle: React.CSSProperties =
-    product.width_in === 24
-      ? {
-        width: '64px',
-        height: '96px',
-        background: 'linear-gradient(145deg, #c40036, #8b001f)',
-        borderRadius: '6px',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-      }
-      : product.width_in === 36
-        ? {
-          width: '64px',
-          height: '128px',
-          background: 'linear-gradient(145deg, #17c1ce, #0e8a94)',
-          borderRadius: '6px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        }
-        : {
-          width: '76px',
-          height: '152px',
-          background: 'linear-gradient(145deg, #f4c33d, #c89b00)',
-          borderRadius: '6px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        }
-
-  const dimLabel = `${product.width_in} × ${product.height_in}`
-
-  const cardStyle: React.CSSProperties = isSelected
-    ? {
-      borderTop: '4px solid #c40036',
-      backgroundColor: 'rgba(196,0,54,0.03)',
-      border: '1px solid rgba(196,0,54,0.18)',
-      borderTopWidth: '4px',
-      borderTopColor: '#c40036',
-    }
-    : {
-      border: '1px solid rgba(23,24,28,0.08)',
-      backgroundColor: '#ffffff',
-    }
+  const tier = getProductTier(product)
+  const isFeatured = tier === 'featured'
+  const style = getCardPreviewStyle(product, orientation)
 
   return (
     <button
       type="button"
       onClick={() => onSelect(product.id)}
       aria-pressed={isSelected}
-      className="group relative flex flex-col rounded-3xl p-8 text-left transition-all duration-200"
-      style={{
-        ...cardStyle,
-        borderRadius: '24px',
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) {
-          ; (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px)'
-            ; (e.currentTarget as HTMLButtonElement).style.boxShadow =
-              '0 12px 32px rgba(23,24,28,0.10)'
-        }
-      }}
-      onMouseLeave={(e) => {
-        ; (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'
-          ; (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none'
-      }}
+      className={cx(
+        'mib-orderSizeCard',
+        isSelected && 'is-selected',
+        isFeatured && 'is-featured',
+      )}
+      style={style}
     >
-      <div className="flex items-start justify-between gap-3">
+      {isFeatured && <span className="mib-orderSizeCard__badge">Most picked</span>}
+
+      <div className="mib-orderSizeCard__scene" aria-hidden>
+        <div className="mib-orderSizeCard__shape">
+          <span className="mib-orderSizeCard__line mib-orderSizeCard__line--x" />
+          <span className="mib-orderSizeCard__line mib-orderSizeCard__line--y" />
+        </div>
+      </div>
+
+      <div className="mib-orderSizeCard__header">
         <div>
-          <p
-            className="font-medium uppercase"
-            style={{
-              fontSize: '10px',
-              letterSpacing: '0.14em',
-              color: 'rgba(23,24,28,0.4)',
-            }}
-          >
-            Vinyl Banner
-          </p>
-          <h2
-            className="mt-1.5 font-bold"
-            style={{ fontSize: '28px', letterSpacing: '-0.03em', color: '#17181c' }}
-          >
-            {sizeLabel}
-          </h2>
+          <h3 className="mib-orderSizeCard__size">{getProductSizeLabel(product)}</h3>
+          <p className="mib-orderSizeCard__meta">{orientation} preview</p>
         </div>
-
-        {isMostPopular ? (
-          <span
-            className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase"
-            style={{
-              letterSpacing: '0.1em',
-              backgroundColor: '#c40036',
-              color: '#fff',
-            }}
-          >
-            Popular
-          </span>
-        ) : isBestValue ? (
-          <span
-            className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase"
-            style={{
-              letterSpacing: '0.1em',
-              backgroundColor: 'rgba(244,195,61,0.15)',
-              color: '#8b6800',
-              border: '1px solid rgba(244,195,61,0.5)',
-            }}
-          >
-            Best Value
-          </span>
-        ) : null}
+        <strong className="mib-orderSizeCard__price">{formatPrice(product.price_cents)}</strong>
       </div>
 
-      <div
-        className="mt-5 flex items-end justify-center pb-6"
-        style={{
-          height: '220px',
-          backgroundColor: '#17181c',
-          borderRadius: '16px',
-        }}
-      >
-        <div className="flex flex-col items-center gap-3">
-          <div style={bannerStyle} />
-          <span
-            style={{
-              fontSize: '11px',
-              color: 'rgba(255,255,255,0.3)',
-              letterSpacing: '0.05em',
-            }}
-          >
-            {dimLabel}
-          </span>
-        </div>
+      <div className="mib-orderSizeCard__body">
+        <p className="mib-orderSizeCard__label">Best for</p>
+        <p className="mib-orderSizeCard__use">{getProductUse(product)}</p>
       </div>
 
-      <p
-        className="mt-6 font-extrabold"
-        style={{ fontSize: '56px', letterSpacing: '-0.04em', color: '#17181c', lineHeight: 1 }}
-      >
-        ${price}
-      </p>
-
-      <p
-        className="mt-2 flex-grow leading-relaxed"
-        style={{ fontSize: '15px', color: 'rgba(23,24,28,0.6)', minHeight: '44px' }}
-      >
-        {isMostPopular
-          ? 'Best for events, booths, and all-around visibility.'
-          : isBestValue
-            ? 'Maximum impact for garages, fences, and big presence.'
-            : 'Best for smaller events, tables, and quick setups.'}
-      </p>
-
-      <div
-        className="mt-6 inline-flex w-full items-center justify-center gap-2 font-semibold text-white transition-all duration-200"
-        style={{
-          height: '50px',
-          borderRadius: '999px',
-          backgroundColor: isSelected ? '#c40036' : '#17181c',
-          fontSize: '15px',
-        }}
-      >
-        {isSelected ? (
-          <>
-            Selected
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-              <path
-                d="M2 7l3.5 3.5 6.5-7"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </>
-        ) : (
-          'Select Size'
-        )}
-      </div>
+      <span className="mib-orderSizeCard__cta">
+        {isSelected ? 'Selected size' : 'Choose this size'}
+      </span>
     </button>
   )
 }
 
-// ---------------------------------------------------------------------------
-// UploadSection
-// ---------------------------------------------------------------------------
-
 function UploadSection({
   selectedProduct,
+  orientation,
   onFileStateChange,
 }: {
   selectedProduct: Pick<Product, 'id' | 'name' | 'width_in' | 'height_in' | 'price_cents'>
+  orientation: PrintOrientation
   onFileStateChange: (hasFile: boolean) => void
 }) {
   const [fileState, setFileState] = useState<FileState | null>(null)
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [checkoutState, setCheckoutState] = useState<CheckoutState>('idle')
-  // File name from previous session — cleared once a new file is selected
-  const [resumeHint, setResumeHint] = useState<string | null>(null)
+  const [resumeHint, setResumeHint] = useState<string | null>(() => {
+    const saved = loadResumeDraft()
+    return saved && saved.productId === selectedProduct.id && saved.orientation === orientation
+      ? saved.fileName
+      : null
+  })
+  const [isDragging, setIsDragging] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const activePreviewUrl = useRef<string | null>(null)
   const imgLoadRef = useRef<HTMLImageElement | null>(null)
 
-  // Notify parent whenever file presence changes
   useEffect(() => {
     onFileStateChange(fileState !== null)
   }, [fileState, onFileStateChange])
 
-  // Check sessionStorage for a prior draft on this product
-  useEffect(() => {
-    const saved = loadResumeDraft()
-    if (saved && saved.productId === selectedProduct.id) {
-      setResumeHint(saved.fileName)
-    }
-  }, [selectedProduct.id])
-
-  // Revoke object URL and cancel in-flight image load on unmount
   useEffect(() => {
     return () => {
       if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current)
@@ -699,40 +497,36 @@ function UploadSection({
     }
   }, [])
 
-  // Persist draft metadata once validation resolves
   const orderDraft: OrderDraft | null = useMemo(
     () =>
       fileState?.validation != null
         ? {
-          product: selectedProduct,
-          fileName: fileState.file.name,
-          fileSizeBytes: fileState.file.size,
-          fileType: fileState.file.type,
-          validation: fileState.validation,
-        }
+            product: selectedProduct,
+            orientation,
+            fileName: fileState.file.name,
+            fileSizeBytes: fileState.file.size,
+            fileType: fileState.file.type,
+            validation: fileState.validation,
+          }
         : null,
-    [fileState, selectedProduct],
+    [fileState, orientation, selectedProduct],
   )
 
   useEffect(() => {
-    if (orderDraft) {
-      saveResumeDraft({
-        productId: orderDraft.product.id,
-        fileName: orderDraft.fileName,
-        fileType: orderDraft.fileType,
-      })
-    }
+    if (!orderDraft) return
+    saveResumeDraft({
+      productId: orderDraft.product.id,
+      orientation: orderDraft.orientation,
+      fileName: orderDraft.fileName,
+      fileType: orderDraft.fileType,
+    })
   }, [orderDraft])
 
   function openFilePicker() {
     inputRef.current?.click()
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const selected = e.target.files?.[0]
-    if (inputRef.current) inputRef.current.value = ''
-    if (!selected) return
-
+  function resetActiveImageLoad() {
     if (activePreviewUrl.current) {
       URL.revokeObjectURL(activePreviewUrl.current)
       activePreviewUrl.current = null
@@ -742,7 +536,10 @@ function UploadSection({
       imgLoadRef.current.onerror = null
       imgLoadRef.current = null
     }
+  }
 
+  function handleIncomingFile(selected: File) {
+    resetActiveImageLoad()
     setSizeError(null)
     setResumeHint(null)
     setCheckoutState('idle')
@@ -764,7 +561,7 @@ function UploadSection({
 
       img.onload = () => {
         if (imgLoadRef.current !== img) return
-        const result = validateImageDpi(img.width, img.height, selectedProduct)
+        const result = validateImageDpi(img.width, img.height, selectedProduct, orientation)
         setFileState((prev) => (prev ? { ...prev, validation: result } : prev))
         imgLoadRef.current = null
       }
@@ -774,33 +571,42 @@ function UploadSection({
         setFileState((prev) =>
           prev
             ? {
-              ...prev,
-              validation: {
-                status: 'bad',
-                message: 'Could not read image dimensions. Please try another file.',
-              },
-            }
+                ...prev,
+                validation: {
+                  status: 'bad',
+                  message: 'Could not read image dimensions.',
+                  recommendation: 'Try a PNG, JPG, or PDF export from your design tool.',
+                },
+              }
             : prev,
         )
         imgLoadRef.current = null
       }
 
       img.src = url
-    } else {
-      setFileState({ file: selected, previewUrl: null, validation: validatePdf() })
+      return
     }
+
+    setFileState({ file: selected, previewUrl: null, validation: validatePdf(selectedProduct, orientation) })
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0]
+    if (inputRef.current) inputRef.current.value = ''
+    if (!selected) return
+    handleIncomingFile(selected)
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setIsDragging(false)
+    const dropped = event.dataTransfer.files?.[0]
+    if (!dropped) return
+    handleIncomingFile(dropped)
   }
 
   function handleRemove() {
-    if (activePreviewUrl.current) {
-      URL.revokeObjectURL(activePreviewUrl.current)
-      activePreviewUrl.current = null
-    }
-    if (imgLoadRef.current) {
-      imgLoadRef.current.onload = null
-      imgLoadRef.current.onerror = null
-      imgLoadRef.current = null
-    }
+    resetActiveImageLoad()
     setFileState(null)
     setSizeError(null)
     setCheckoutState('idle')
@@ -808,56 +614,21 @@ function UploadSection({
     clearResumeDraft()
   }
 
-  async function handleCheckout() {
+  function handleCheckout() {
     if (!CHECKOUT_ENABLED || !orderDraft || !fileState) return
     setCheckoutState('submitting')
-
-    try {
-      // ── Step 1: Upload file to Supabase Storage ──────────────────────────
-      // const { data: upload, error: uploadError } = await supabase.storage
-      //   .from('designs')
-      //   .upload(`orders/${crypto.randomUUID()}/${fileState.file.name}`, fileState.file)
-      // if (uploadError) throw uploadError
-
-      // ── Step 2: Create design record ─────────────────────────────────────
-      // const { data: design, error: designError } = await supabase
-      //   .from('designs')
-      //   .insert({ product_id: orderDraft.product.id, storage_path: upload.path, ... })
-      //   .select()
-      //   .single()
-      // if (designError) throw designError
-
-      // ── Step 3: Create Stripe checkout session via route handler ─────────
-      // const res = await fetch('/api/checkout', {
-      //   method: 'POST',
-      //   body: JSON.stringify({ designId: design.id }),
-      // })
-      // if (!res.ok) throw new Error('Failed to create checkout session')
-      // const { url } = await res.json()
-      // router.push(url)
-    } catch {
-      setCheckoutState('error')
-    }
   }
 
   return (
-    <section className="mt-16">
-      <div className="max-w-3xl">
-        <p
-          className="text-xs font-semibold uppercase"
-          style={{ letterSpacing: '0.16em', color: '#c40036' }}
-        >
-          Step 02
-        </p>
-        <h2
-          className="mt-3 font-bold"
-          style={{ fontSize: '36px', letterSpacing: '-0.03em', color: '#17181c' }}
-        >
-          Upload your design for {selectedProduct.width_in} × {selectedProduct.height_in} in
-        </h2>
-        <p className="mt-3 leading-7" style={{ fontSize: '16px', color: 'rgba(23,24,28,0.55)' }}>
-          PNG, JPG, or PDF. We&apos;ll check it and let you know if it looks sharp at this size.
-        </p>
+    <section className="mib-shell mib-orderUpload" aria-labelledby="upload-heading">
+      <div className="mib-orderPanel__head mib-orderPanel__head--upload">
+        <div>
+          <span className="mib-orderStepLabel">Step 02</span>
+          <h2 id="upload-heading" className="mib-orderPanel__title">Upload your design</h2>
+          <p className="mib-orderPanel__copy">
+            Selected format: {getProductFormatLabel(selectedProduct, orientation)}. We will check resolution before you checkout.
+          </p>
+        </div>
       </div>
 
       <input
@@ -865,148 +636,110 @@ function UploadSection({
         type="file"
         accept=".png,.jpg,.jpeg,.pdf"
         onChange={handleFileChange}
-        className="sr-only"
+        className="mib-srOnly"
         aria-label="Upload your design file"
         tabIndex={-1}
       />
 
-      <div
-        className="mt-8 rounded-[20px] bg-white text-center transition-colors duration-150"
-        style={{
-          border: '2px dashed rgba(196,0,54,0.25)',
-          padding: '48px 32px',
-        }}
-        onDragOver={(e) => {
-          e.preventDefault()
-          e.currentTarget.style.borderColor = '#c40036'
-          e.currentTarget.style.backgroundColor = 'rgba(196,0,54,0.02)'
-        }}
-        onDragLeave={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(196,0,54,0.25)'
-          e.currentTarget.style.backgroundColor = '#ffffff'
-        }}
-        onDrop={(e) => {
-          e.preventDefault()
-          e.currentTarget.style.borderColor = 'rgba(196,0,54,0.25)'
-          e.currentTarget.style.backgroundColor = '#ffffff'
-          const dropped = e.dataTransfer.files?.[0]
-          if (!dropped) return
-          const synth = { target: { files: e.dataTransfer.files, value: '' } } as unknown as React.ChangeEvent<HTMLInputElement>
-          handleFileChange(synth)
-        }}
-      >
-        {fileState === null ? (
-          <EmptyUpload onChoose={openFilePicker} sizeError={sizeError} resumeHint={resumeHint} />
+      <div className="mib-orderUploadGrid">
+        <div
+          className={cx(
+            'mib-orderDropzone',
+            fileState && 'has-file',
+            isDragging && 'is-dragging',
+          )}
+          onClick={fileState ? undefined : openFilePicker}
+          onKeyDown={(event) => {
+            if (fileState) return
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              openFilePicker()
+            }
+          }}
+          onDragOver={(event) => {
+            event.preventDefault()
+            setIsDragging(true)
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          role={fileState ? undefined : 'button'}
+          tabIndex={fileState ? undefined : 0}
+          aria-label={fileState ? undefined : 'Upload your banner design'}
+        >
+          {fileState === null ? (
+            <EmptyUpload
+              onChoose={openFilePicker}
+              sizeError={sizeError}
+              resumeHint={resumeHint}
+              selectedLabel={getProductFormatLabel(selectedProduct, orientation)}
+            />
+          ) : (
+            <FilePreview fileState={fileState} onRemove={handleRemove} onReplace={openFilePicker} />
+          )}
+        </div>
+
+        {orderDraft === null ? (
+          <UploadGuidePanel selectedProduct={selectedProduct} orientation={orientation} />
         ) : (
-          <FilePreview
-            fileState={fileState}
-            onRemove={handleRemove}
-            onReplace={openFilePicker}
+          <OrderSummary
+            draft={orderDraft}
+            delivery={STANDARD_DELIVERY}
+            checkoutState={checkoutState}
+            checkoutEnabled={CHECKOUT_ENABLED}
+            onCheckout={handleCheckout}
           />
         )}
       </div>
-
-      {orderDraft !== null && (
-        <OrderSummary
-          draft={orderDraft}
-          delivery={STANDARD_DELIVERY}
-          checkoutState={checkoutState}
-          checkoutEnabled={CHECKOUT_ENABLED}
-          onCheckout={handleCheckout}
-        />
-      )}
     </section>
   )
 }
-
-// ---------------------------------------------------------------------------
-// EmptyUpload
-// ---------------------------------------------------------------------------
 
 function EmptyUpload({
   onChoose,
   sizeError,
   resumeHint,
+  selectedLabel,
 }: {
   onChoose: () => void
   sizeError: string | null
   resumeHint: string | null
+  selectedLabel: string
 }) {
   return (
-    <div className="flex flex-col items-center">
-      <div
-        className="flex items-center justify-center rounded-full"
-        style={{
-          width: '56px',
-          height: '56px',
-          backgroundColor: 'rgba(196,0,54,0.08)',
-          color: '#c40036',
-        }}
-      >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M12 16V8m0 0-3 3m3-3 3 3"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M3 16v1a4 4 0 0 0 4 4h10a4 4 0 0 0 4-4v-1"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-          />
-        </svg>
+    <div className="mib-orderEmpty">
+      <div className="mib-orderBubbles" aria-hidden>
+        <span className="mib-orderBubble mib-orderBubble--one" />
+        <span className="mib-orderBubble mib-orderBubble--two" />
+        <span className="mib-orderBubble mib-orderBubble--three" />
       </div>
 
-      <p className="mt-4 font-bold" style={{ fontSize: '20px', color: '#17181c' }}>
-        Drop your design here
-      </p>
-      <p className="mt-1 text-sm" style={{ color: 'rgba(23,24,28,0.45)' }}>
-        or click to browse
-      </p>
+      <span className="mib-orderUploadIcon" aria-hidden>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+          <path d="M12 16V7.5m0 0-3.2 3.2M12 7.5l3.2 3.2" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4 16.5v.6c0 2 1.6 3.6 3.6 3.6h8.8c2 0 3.6-1.6 3.6-3.6v-.6" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" />
+        </svg>
+      </span>
 
-      <button
-        type="button"
-        onClick={onChoose}
-        className="mt-5 inline-flex cursor-pointer items-center rounded-full px-8 font-semibold text-white transition hover:opacity-90"
-        style={{ height: '48px', backgroundColor: '#c40036', fontSize: '15px' }}
-      >
-        Choose File
+      <h3>Upload your design to run a print check.</h3>
+      <p>Drop a PNG, JPG, or PDF here. We will preview it for {selectedLabel}.</p>
+
+      <button type="button" className="mib-orderButton mib-orderButton--gradient" onClick={(event) => {
+        event.stopPropagation()
+        onChoose()
+      }}>
+        Choose file
       </button>
 
       {sizeError ? (
-        <p className="mt-3 text-sm font-medium" style={{ color: '#c40036' }} role="alert">
-          {sizeError}
-        </p>
+        <p className="mib-orderUploadNote is-error" role="alert">{sizeError}</p>
       ) : resumeHint ? (
-        <p className="mt-3 text-sm" style={{ color: 'rgba(23,24,28,0.5)' }}>
-          Last time you used{' '}
-          <span className="font-semibold" style={{ color: 'rgba(23,24,28,0.75)' }}>
-            {resumeHint}
-          </span>{' '}
-          — upload it again to continue.
-        </p>
+        <p className="mib-orderUploadNote">Last file: <strong>{resumeHint}</strong>. Upload it again to continue.</p>
       ) : (
-        <p
-          className="mt-3 uppercase"
-          style={{
-            fontSize: '11px',
-            letterSpacing: '0.12em',
-            color: 'rgba(23,24,28,0.35)',
-          }}
-        >
-          PNG · JPG · PDF · Max {FILE_SIZE_LIMIT_MB} MB
-        </p>
+        <p className="mib-orderUploadNote">PNG · JPG · PDF · Max {FILE_SIZE_LIMIT_MB} MB</p>
       )}
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// FilePreview
-// ---------------------------------------------------------------------------
 
 function FilePreview({
   fileState,
@@ -1020,140 +753,91 @@ function FilePreview({
   const { file, previewUrl, validation } = fileState
 
   return (
-    <div className="flex flex-col items-center">
-      <p
-        className="text-xs font-semibold uppercase"
-        style={{ letterSpacing: '0.14em', color: 'rgba(23,24,28,0.4)' }}
-      >
-        File Selected
-      </p>
-      <p className="mt-2 break-all font-semibold" style={{ fontSize: '18px', color: '#17181c' }}>
-        {file.name}
-      </p>
-      <p className="mt-1 text-sm" style={{ color: 'rgba(23,24,28,0.5)' }}>
-        {(file.size / 1024 / 1024).toFixed(2)} MB
-      </p>
+    <div className="mib-orderPreview">
+      <div className="mib-orderPreview__top">
+        <div>
+          <span className="mib-orderPreview__label">Uploaded file preview</span>
+          <p className="mib-orderPreview__file" title={file.name}>{file.name}</p>
+        </div>
+        <span className="mib-orderPreview__chip">{formatFileSize(file.size)}</span>
+      </div>
 
-      {previewUrl ? (
-        <div
-          className="mt-6 overflow-hidden rounded-xl p-3"
-          style={{
-            border: '1px solid rgba(23,24,28,0.08)',
-            backgroundColor: 'rgba(23,24,28,0.04)',
-          }}
-        >
-          <img
+      <div className="mib-orderPreview__canvas">
+        {previewUrl ? (
+          <Image
             src={previewUrl}
             alt={`Preview of ${file.name}`}
-            className="w-auto object-contain"
-            style={{ maxHeight: '280px', maxWidth: '280px' }}
+            width={900}
+            height={600}
+            unoptimized
+            className="mib-orderPreview__image"
           />
-        </div>
-      ) : (
-        <div
-          className="mt-6 rounded-xl px-6 py-8 text-sm"
-          style={{
-            border: '1px solid rgba(23,24,28,0.08)',
-            backgroundColor: 'rgba(23,24,28,0.04)',
-            color: 'rgba(23,24,28,0.55)',
-          }}
-        >
-          PDF selected. Preview coming in the next step.
-        </div>
-      )}
+        ) : (
+          <div className="mib-orderPreview__pdf">PDF selected. We will verify it before production.</div>
+        )}
+      </div>
 
       {validation === null ? (
-        <p className="mt-4 text-sm" style={{ color: 'rgba(23,24,28,0.5)' }} aria-live="polite">
-          Checking image quality...
+        <p className="mib-orderChecking" aria-live="polite">
+          Checking print quality<span><i /><i /><i /></span>
         </p>
       ) : (
         <ValidationBadge validation={validation} />
       )}
 
-      <div className="mt-6 flex gap-6">
-        <button
-          type="button"
-          onClick={onReplace}
-          className="text-sm font-medium transition hover:opacity-70"
-          style={{ color: 'rgba(23,24,28,0.55)' }}
-        >
-          Replace file
-        </button>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-sm font-medium transition hover:opacity-70"
-          style={{ color: '#c40036' }}
-        >
-          Remove file
-        </button>
+      <div className="mib-orderPreview__actions">
+        <button type="button" onClick={onReplace}>Replace file</button>
+        <button type="button" onClick={onRemove}>Remove</button>
       </div>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// ValidationBadge
-// ---------------------------------------------------------------------------
-
-function ValidationBadge({ validation }: { validation: ValidationResult }) {
-  const styles: React.CSSProperties =
-    validation.status === 'good'
-      ? {
-        borderColor: 'rgba(23,193,206,0.35)',
-        backgroundColor: 'rgba(23,193,206,0.08)',
-      }
-      : validation.status === 'warn'
-        ? {
-          borderColor: 'rgba(244,195,61,0.4)',
-          backgroundColor: 'rgba(244,195,61,0.08)',
-        }
-        : {
-          borderColor: 'rgba(196,0,54,0.3)',
-          backgroundColor: 'rgba(196,0,54,0.06)',
-        }
-
-  const titleColor =
-    validation.status === 'good'
-      ? '#0e8a94'
-      : validation.status === 'warn'
-        ? '#8b6800'
-        : '#c40036'
+function UploadGuidePanel({
+  selectedProduct,
+  orientation,
+}: {
+  selectedProduct: Pick<Product, 'width_in' | 'height_in'>
+  orientation: PrintOrientation
+}) {
+  const checks = [
+    ['Resolution', `Checks effective print quality for ${getProductFormatLabel(selectedProduct, orientation)}.`],
+    ['Crop fit', 'Shows whether the file works naturally in this direction.'],
+    ['Review', 'Summarizes price, file quality, and delivery before checkout.'],
+  ]
 
   return (
-    <div
-      className="mt-6 w-full max-w-xl rounded-2xl border px-5 py-4 text-left"
-      style={styles}
-      role="status"
-      aria-live="polite"
-    >
-      <p className="text-sm font-semibold" style={{ color: titleColor }}>
-        {validation.message}
-      </p>
+    <aside className="mib-orderGuide" aria-label="Print checks that run after upload">
+      <span className="mib-orderStepLabel">Step 03</span>
+      <h3>Live print check</h3>
+      <p>Upload a file and this panel turns into your order review.</p>
+      <ul>
+        {checks.map(([title, body]) => (
+          <li key={title}>
+            <span>Runs after upload</span>
+            <strong>{title}</strong>
+            <p>{body}</p>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )
+}
 
-      {validation.recommendation && (
-        <p className="mt-1 text-sm" style={{ color: 'rgba(23,24,28,0.6)' }}>
-          {validation.recommendation}
-        </p>
-      )}
-
-      {validation.payoff && (
-        <p className="mt-2 text-sm font-medium" style={{ color: 'rgba(23,24,28,0.75)' }}>
-          {validation.payoff}
-        </p>
-      )}
+function ValidationBadge({ validation }: { validation: ValidationResult }) {
+  return (
+    <div className={cx('mib-orderValidation', `is-${validation.status}`)} role="status" aria-live="polite">
+      <strong>{validation.message}</strong>
+      {validation.recommendation && <p>{validation.recommendation}</p>}
+      {validation.payoff && <p>{validation.payoff}</p>}
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// OrderSummary
-// ---------------------------------------------------------------------------
-
 const QUALITY_LABELS: Record<ValidationStatus, string> = {
-  good: 'Sharp at this size',
-  warn: 'May look slightly soft',
-  bad: 'File quality too low',
+  good: 'Ready',
+  warn: 'Needs review',
+  bad: 'Needs fix',
 }
 
 function OrderSummary({
@@ -1169,171 +853,73 @@ function OrderSummary({
   checkoutEnabled: boolean
   onCheckout: () => void
 }) {
-  const { product, fileName, validation } = draft
-
+  const { product, orientation, fileName, validation } = draft
   const blocked = validation.status === 'bad'
   const submitting = checkoutState === 'submitting'
   const ctaDisabled = !checkoutEnabled || blocked || submitting
 
   return (
-    <div
-      className="mt-8 rounded-3xl p-10"
-      style={{ backgroundColor: '#17181c' }}
-    >
-      <p
-        className="text-xs font-semibold uppercase"
-        style={{ letterSpacing: '0.16em', color: '#c40036' }}
-      >
-        Step 03
-      </p>
-      <h3
-        className="mt-2 font-bold text-white"
-        style={{ fontSize: '28px', letterSpacing: '-0.02em' }}
-      >
-        Order Summary
-      </h3>
+    <aside className={cx('mib-orderSummary', `is-${validation.status}`)} aria-label="Order summary">
+      <div className="mib-orderSummary__head">
+        <span className="mib-orderStepLabel">Step 03</span>
+        <span className={cx('mib-orderStatusChip', `is-${validation.status}`)}>{QUALITY_LABELS[validation.status]}</span>
+      </div>
 
-      <div className="mt-6" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      <h3>Review before checkout</h3>
+      <p className="mib-orderSummary__copy">We checked the file against your selected banner format.</p>
+
+      <div className="mib-orderSummary__rows">
         <SummaryRow label="Banner">
-          <span className="font-semibold text-white">
-            {product.width_in} × {product.height_in} in
-          </span>
-          <span className="ml-3" style={{ color: 'rgba(255,255,255,0.5)' }}>
-            Vinyl Banner
-          </span>
+          {getProductFormatLabel(product, orientation)} <span>{getProductInchLabel(product)}</span>
         </SummaryRow>
-
-        <SummaryRow label="Price">
-          <span className="font-bold text-white" style={{ fontSize: '20px' }}>
-            {formatPrice(product.price_cents)}
-          </span>
-        </SummaryRow>
-
-        <SummaryRow label="File">
-          <span className="max-w-xs truncate font-medium text-white" title={fileName}>
-            {fileName}
-          </span>
-        </SummaryRow>
-
-        <SummaryRow label="Quality">
-          <QualityIndicator status={validation.status} />
-        </SummaryRow>
-
+        <SummaryRow label="Price">{formatPrice(product.price_cents)}</SummaryRow>
+        <SummaryRow label="File"><span title={fileName}>{fileName}</span></SummaryRow>
+        <SummaryRow label="Quality"><QualityIndicator status={validation.status} /></SummaryRow>
         <SummaryRow label="Delivery">
-          <span className="font-medium text-white">{delivery.range}</span>
-          {delivery.note && (
-            <span className="ml-2 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-              {delivery.note}
-            </span>
-          )}
+          {delivery.range} {delivery.note && <span>{delivery.note}</span>}
         </SummaryRow>
       </div>
 
-      <div className="mt-8">
-        {blocked && (
-          <p className="mb-4 text-sm font-medium" style={{ color: '#c40036' }} role="alert">
-            Upload a higher resolution file to continue.
-          </p>
-        )}
+      {blocked && <p className="mib-orderSummary__alert" role="alert">Upload a higher-resolution file to continue.</p>}
+      {!checkoutEnabled && (
+        <p className="mib-orderSummary__devNote">Checkout is not connected yet in this build.</p>
+      )}
 
-        {checkoutState === 'error' && (
-          <p className="mb-4 text-sm font-medium" style={{ color: '#c40036' }} role="alert">
-            Something went wrong. Please try again.
-          </p>
-        )}
+      <button
+        type="button"
+        onClick={onCheckout}
+        disabled={ctaDisabled}
+        aria-disabled={ctaDisabled}
+        className="mib-orderCheckout"
+      >
+        {submitting
+          ? 'Processing...'
+          : !checkoutEnabled
+            ? 'Checkout coming soon'
+            : blocked
+              ? 'Upload sharper file'
+              : 'Continue to checkout'}
+      </button>
 
-        {!checkoutEnabled && (
-          <p
-            className="mb-4 rounded-xl px-4 py-3 text-sm"
-            style={{
-              border: '1px solid rgba(255,255,255,0.10)',
-              backgroundColor: 'rgba(255,255,255,0.05)',
-              color: 'rgba(255,255,255,0.5)',
-            }}
-          >
-            Checkout is not yet available — backend integration in progress.
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={onCheckout}
-          disabled={ctaDisabled}
-          aria-disabled={ctaDisabled}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-full font-semibold text-white transition hover:opacity-90"
-          style={{
-            height: '56px',
-            fontSize: '16px',
-            backgroundColor: ctaDisabled ? 'rgba(255,255,255,0.10)' : '#c40036',
-            color: ctaDisabled ? 'rgba(255,255,255,0.30)' : '#ffffff',
-            cursor: ctaDisabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {submitting ? (
-            'Processing...'
-          ) : (
-            <>
-              Continue to Checkout
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <path
-                  d="M3 8h10m0 0-3.5-3.5M13 8l-3.5 3.5"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </>
-          )}
-        </button>
-
-        <p
-          className="mt-3 text-center text-xs"
-          style={{ color: 'rgba(255,255,255,0.35)' }}
-        >
-          You won&apos;t be charged until the next step.
-        </p>
-      </div>
-    </div>
+      <p className="mib-orderSummary__fine">You will not be charged until checkout is complete.</p>
+    </aside>
   )
 }
 
-// ---------------------------------------------------------------------------
-// SummaryRow
-// ---------------------------------------------------------------------------
-
-function SummaryRow({ label, children }: { label: string; children: React.ReactNode }) {
+function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div
-      className="flex items-baseline justify-between gap-4 py-4"
-      style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
-    >
-      <span className="shrink-0 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-        {label}
-      </span>
-      <span className="flex flex-wrap items-baseline justify-end gap-1 text-right text-sm">
-        {children}
-      </span>
+    <div className="mib-orderSummaryRow">
+      <span>{label}</span>
+      <strong>{children}</strong>
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// QualityIndicator
-// ---------------------------------------------------------------------------
 
 function QualityIndicator({ status }: { status: ValidationStatus }) {
-  const dotColor =
-    status === 'good' ? '#17c1ce' : status === 'warn' ? '#f4c33d' : '#c40036'
-
   return (
-    <span className="flex items-center gap-2">
-      <span
-        className="inline-block h-2 w-2 shrink-0 rounded-full"
-        style={{ backgroundColor: dotColor }}
-        aria-hidden
-      />
-      <span className="font-medium text-white">{QUALITY_LABELS[status]}</span>
+    <span className={cx('mib-orderQuality', `is-${status}`)}>
+      <i aria-hidden />
+      {QUALITY_LABELS[status]}
     </span>
   )
 }

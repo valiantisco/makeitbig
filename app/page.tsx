@@ -1,72 +1,28 @@
-﻿'use client'
+'use client'
 
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion'
-import { CSSProperties, ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react'
-
-type ValidationFeedback = {
-  sharpTone: 'good' | 'warn'
-  softnessTone: 'good' | 'warn'
-  recommendationTone: 'good' | 'warn' | 'info'
-  recommendedSizeId: PrintSizeId
-  selectedFormatLabel: string
-  distanceTitle: string
-  distanceBody: string
-  distanceHint: string
-  detailTitle: string
-  detailBody: string
-  detailHint: string
-  sizeTitle: string
-  sizeBody: string
-  sizeHint: string
-}
-
-const BANNER_SIZES = [
-  { id: '2x3', label: '2 x 3', shortIn: 24, longIn: 36, baseAcceptablePpi: 72 },
-  { id: '3-5x6', label: '3.5 x 6', shortIn: 42, longIn: 72, baseAcceptablePpi: 56 },
-  { id: '5-5x10', label: '5.5 x 10', shortIn: 66, longIn: 120, baseAcceptablePpi: 42 },
-] as const
-
-const PRINT_ORIENTATIONS = [
-  { id: 'horizontal', label: 'Horizontal' },
-  { id: 'vertical', label: 'Vertical' },
-] as const
-
-type BannerSize = (typeof BANNER_SIZES)[number]
-type PrintSizeId = BannerSize['id']
-type PrintOrientation = (typeof PRINT_ORIENTATIONS)[number]['id']
-
-const PRICING_OPTIONS: Array<{
-  id: PrintSizeId
-  size: string
-  price: string
-  bestFor: string
-}> = [
-    {
-      id: '2x3',
-      size: '2 x 3',
-      price: '$30',
-      bestFor: 'Small booths, tabletop displays, and quick event signage.',
-    },
-    {
-      id: '3-5x6',
-      size: '3.5 x 6',
-      price: '$75',
-      bestFor: 'The easy default for booths, walls, and storefront visibility.',
-    },
-    {
-      id: '5-5x10',
-      size: '5.5 x 10',
-      price: '$150',
-      bestFor: 'Large backdrops, wide walls, and big-room impact.',
-    },
-  ]
-
-function getBannerSizeById(id: PrintSizeId) {
-  return BANNER_SIZES.find((size) => size.id === id) ?? BANNER_SIZES[0]
-}
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, ChangeEvent, DragEvent, ReactNode } from 'react'
+import {
+  BANNER_SIZES,
+  PRINT_ORIENTATIONS,
+  PRICING_OPTIONS,
+  clamp,
+  cx,
+  formatBannerLabel,
+  formatFileSize,
+  getBannerPrintDimensions,
+  getBannerSizeById,
+  getFormatLabel,
+  getOrderHref,
+  getShortFormatLabel,
+  type BannerSize,
+  type PrintOrientation,
+  type PrintSizeId,
+} from '@/lib/banner-config'
 
 function getPricingVisualDimensions(id: PrintSizeId, orientation: PrintOrientation) {
   const dimensions = {
@@ -85,32 +41,127 @@ function getPricingVisualDimensions(id: PrintSizeId, orientation: PrintOrientati
   return dimensions[orientation][id]
 }
 
-function formatBannerLabel(label: string) {
-  return label.replace(' x ', ' \u00d7 ')
+type ValidationFeedback = {
+  sharpTone: 'good' | 'warn'
+  softnessTone: 'good' | 'warn'
+  recommendationTone: 'good' | 'warn' | 'info'
+  recommendedSizeId: PrintSizeId
+  selectedFormatLabel: string
+  distanceTitle: string
+  distanceBody: string
+  distanceHint: string
+  detailTitle: string
+  detailBody: string
+  detailHint: string
+  sizeTitle: string
+  sizeBody: string
+  sizeHint: string
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
+type DiagnosticState = 'idle' | 'checking' | 'good' | 'warn' | 'info'
+
+type DiagnosticModule = {
+  key: string
+  accent: 'red' | 'orange' | 'amber'
+  eyebrow: string
+  state: DiagnosticState
+  title: string
+  body: string
+  hint: string
+  icon: ReactNode
 }
 
-function getPrintDimensions(size: BannerSize, orientation: PrintOrientation) {
-  return {
-    widthIn: orientation === 'horizontal' ? size.longIn : size.shortIn,
-    heightIn: orientation === 'horizontal' ? size.shortIn : size.longIn,
+function getDiagnosticStatusLabel(state: DiagnosticState, needsImage: boolean) {
+  if (state === 'checking') return 'Checking'
+  if (state === 'good' || state === 'info') return 'Ready'
+  if (state === 'warn') return 'Needs Fix'
+  return needsImage ? 'Image Needed' : 'Runs after upload'
+}
+
+function getDiagnosticModules({
+  isImageFile,
+  isCheckingFile,
+  selectedFormatLabel,
+  validationFeedback,
+}: {
+  isImageFile: boolean
+  isCheckingFile: boolean
+  selectedFormatLabel: string
+  validationFeedback: ValidationFeedback | null
+}): DiagnosticModule[] {
+  const ready = isImageFile && !isCheckingFile && validationFeedback !== null
+  const running = isImageFile && isCheckingFile
+  const stateFor = (tone: 'good' | 'warn' | 'info' | undefined): DiagnosticState => {
+    if (running) return 'checking'
+    if (!ready || !tone) return 'idle'
+    return tone === 'good' ? 'good' : tone === 'info' ? 'info' : 'warn'
   }
-}
 
-function getFormatLabel(size: BannerSize, orientation: PrintOrientation) {
-  return `${formatBannerLabel(size.label)} ft ${orientation === 'horizontal' ? 'Horizontal' : 'Vertical'}`
-}
-
-function getShortFormatLabel(size: BannerSize, orientation: PrintOrientation) {
-  return `${formatBannerLabel(size.label)} ${orientation === 'horizontal' ? 'Horizontal' : 'Vertical'}`
-}
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return [
+    {
+      key: 'sharp',
+      accent: 'red',
+      eyebrow: 'Quality',
+      state: stateFor(validationFeedback?.sharpTone),
+      title: ready ? validationFeedback.distanceTitle : 'Selected Size Quality',
+      body: ready
+        ? validationFeedback.distanceBody
+        : running
+          ? 'Checking PPI and image detail.'
+          : `Checks effective print quality for ${selectedFormatLabel}.`,
+      hint: ready ? validationFeedback.distanceHint : '',
+      icon: (
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      ),
+    },
+    {
+      key: 'detail',
+      accent: 'orange',
+      eyebrow: 'Crop Fit',
+      state: stateFor(validationFeedback?.softnessTone),
+      title: ready ? validationFeedback.detailTitle : 'Crop Fit',
+      body: ready
+        ? validationFeedback.detailBody
+        : running
+          ? 'Checking selected orientation.'
+          : 'Checks whether the chosen crop keeps the important parts.',
+      hint: ready ? validationFeedback.detailHint : '',
+      icon: (
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 7h16" />
+          <path d="M4 12h10" />
+          <path d="M4 17h7" />
+          <path d="M18 13l3 3-3 3" />
+        </svg>
+      ),
+    },
+    {
+      key: 'size',
+      accent: 'amber',
+      eyebrow: 'Best Pick',
+      state: stateFor(validationFeedback?.recommendationTone),
+      title: ready ? validationFeedback.sizeTitle : 'Recommendation',
+      body: ready
+        ? validationFeedback.sizeBody
+        : running
+          ? 'Comparing size and orientation options.'
+          : 'Shows a safer format if this selection is not the best fit.',
+      hint: ready ? validationFeedback.sizeHint : '',
+      icon: (
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 18V6" />
+          <path d="M20 18V6" />
+          <path d="M7 8h10" />
+          <path d="M7 16h10" />
+          <path d="M9 6L7 8l2 2" />
+          <path d="M15 14l2 2-2 2" />
+        </svg>
+      ),
+    },
+  ]
 }
 
 function createFallbackFeedback(size: BannerSize, orientation: PrintOrientation): ValidationFeedback {
@@ -213,7 +264,7 @@ function analyzePrintReadiness(
   const imageIsTall = imageAspect < 0.88
 
   const scoreFormat = (size: BannerSize, orientation: PrintOrientation) => {
-    const { widthIn, heightIn } = getPrintDimensions(size, orientation)
+    const { widthIn, heightIn } = getBannerPrintDimensions(size, orientation)
     const targetAspect = widthIn / heightIn
     const cropRetained = clamp(Math.min(imageAspect / targetAspect, targetAspect / imageAspect), 0, 1)
     const ppi = Math.min(sourceWidth / widthIn, sourceHeight / heightIn)
@@ -361,7 +412,7 @@ export default function Home() {
   const cloudNearX = useTransform(fileToolScroll, [0, 1], [-90, 90])
   const cloudFarX = useTransform(fileToolScroll, [0, 1], [70, -70])
   const selectedPrintSize = getBannerSizeById(selectedPrintSizeId)
-  const selectedPrintDimensions = getPrintDimensions(selectedPrintSize, selectedOrientation)
+  const selectedPrintDimensions = getBannerPrintDimensions(selectedPrintSize, selectedOrientation)
   const selectedFormatLabel = getFormatLabel(selectedPrintSize, selectedOrientation)
   const featuredPricingSizeId = validationFeedback?.recommendedSizeId ?? '3-5x6'
   const pickedPricingSizeId = selectedPricingSizeId ?? featuredPricingSizeId
@@ -439,6 +490,17 @@ export default function Home() {
   }, [selectedFile, previewUrl, selectedPrintSize, selectedOrientation])
 
   const isImageFile = selectedFile?.type.startsWith('image/') ?? false
+  const diagnosticNeedsImage = selectedFile !== null && !isImageFile
+  const diagnosticModules = useMemo(
+    () =>
+      getDiagnosticModules({
+        isImageFile,
+        isCheckingFile,
+        selectedFormatLabel,
+        validationFeedback,
+      }),
+    [isImageFile, isCheckingFile, selectedFormatLabel, validationFeedback],
+  )
 
   function handleFile(file: File | null) {
     if (!file) return
@@ -495,7 +557,7 @@ export default function Home() {
   }
 
   function handleContinue() {
-    router.push('/order')
+    router.push(getOrderHref(selectedPrintSizeId, selectedOrientation))
   }
 
   function handleTiltMove(e: React.MouseEvent<HTMLLabelElement>) {
@@ -529,8 +591,19 @@ export default function Home() {
               priority
             />
           </Link>
-          <nav className="mib-nav__links" aria-label="Support">
-            <Link href="#pricing" className="mib-nav__help">Pricing</Link>
+          <nav className="mib-nav__links" aria-label="Cart">
+            <Link
+              href="/order"
+              className="mib-nav__cart"
+              aria-label={selectedFile ? 'Open cart with 1 uploaded design' : 'Open cart'}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6.5 6.5h15l-1.7 8.1a2 2 0 0 1-2 1.6H9.1a2 2 0 0 1-2-1.6L5.3 3.8H2.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M9.4 20.2h.1M18 20.2h.1" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" />
+              </svg>
+              {selectedFile && <span className="mib-nav__cartBadge" aria-hidden="true">1</span>}
+              <span className="mib-srOnly">Cart</span>
+            </Link>
           </nav>
         </div>
       </header>
@@ -562,7 +635,7 @@ export default function Home() {
                   <label
                     ref={dropzoneRef}
                     htmlFor="hero-upload"
-                    className={`mib-upload__dropzone${isDragging ? ' is-dragging' : ''}`}
+                    className={cx('mib-upload__dropzone', isDragging && 'is-dragging')}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
@@ -720,7 +793,7 @@ export default function Home() {
                     <button
                       key={size.id}
                       type="button"
-                      className={`mib-fileTool__selectorButton${selectedPrintSizeId === size.id ? ' is-active' : ''}`}
+                      className={cx('mib-fileTool__selectorButton', selectedPrintSizeId === size.id && 'is-active')}
                       onClick={() => setSelectedPrintSizeId(size.id)}
                       aria-pressed={selectedPrintSizeId === size.id}
                     >
@@ -733,7 +806,7 @@ export default function Home() {
                     <button
                       key={orientation.id}
                       type="button"
-                      className={`mib-fileTool__selectorButton${selectedOrientation === orientation.id ? ' is-active' : ''}`}
+                      className={cx('mib-fileTool__selectorButton', selectedOrientation === orientation.id && 'is-active')}
                       onClick={() => setSelectedOrientation(orientation.id)}
                       aria-pressed={selectedOrientation === orientation.id}
                     >
@@ -745,7 +818,7 @@ export default function Home() {
             </div>
 
             <label
-              className={`mib-fileTool__upload${isConfidenceDragging ? ' is-dragging' : ''}`}
+              className={cx('mib-fileTool__upload', isConfidenceDragging && 'is-dragging')}
               onDragOver={handleConfidenceDragOver}
               onDragLeave={handleConfidenceDragLeave}
               onDrop={handleConfidenceDrop}
@@ -765,9 +838,12 @@ export default function Home() {
                   </div>
                   <div className="mib-fileTool__previewCanvas">
                     <div className="mib-fileTool__previewFrame" style={previewAspectStyle}>
-                      <img
+                      <Image
                         src={previewUrl}
                         alt={selectedFile ? `${selectedFile.name} preview` : 'Uploaded image preview'}
+                        width={900}
+                        height={600}
+                        unoptimized
                         className="mib-fileTool__preview"
                       />
                     </div>
@@ -801,152 +877,41 @@ export default function Home() {
 
             <aside className="mib-fileTool__feedback" aria-live="polite">
               <ul className="mib-fileTool__modules">
-                {(() => {
-                  type ModuleState = 'idle' | 'checking' | 'good' | 'warn' | 'info'
-                  const ready = isImageFile && !isCheckingFile && !!validationFeedback
-                  const running = isImageFile && isCheckingFile
-                  const blocked = !!selectedFile && !isImageFile
-
-                  const sharpState: ModuleState = running
-                    ? 'checking'
-                    : ready
-                      ? validationFeedback!.sharpTone === 'good' ? 'good' : 'warn'
-                      : 'idle'
-                  const softState: ModuleState = running
-                    ? 'checking'
-                    : ready
-                      ? validationFeedback!.softnessTone === 'good' ? 'good' : 'warn'
-                      : 'idle'
-                  const sizeState: ModuleState = running
-                    ? 'checking'
-                    : ready
-                      ? validationFeedback!.recommendationTone
-                      : 'idle'
-
-                  const statusLabel = (s: ModuleState) => {
-                    if (s === 'checking') return 'Checking'
-                    if (s === 'good') return 'Ready'
-                    if (s === 'warn') return 'Needs Fix'
-                    if (s === 'info') return 'Ready'
-                    return blocked ? 'Image Needed' : 'Runs after upload'
-                  }
-
-                  const modules = [
-                    {
-                      key: 'sharp',
-                      accent: 'red' as const,
-                      step: '01',
-                      eyebrow: 'Quality',
-                      state: sharpState,
-                      title:
-                        ready
-                          ? validationFeedback!.distanceTitle
-                          : 'Selected Size Quality',
-                      body:
-                        ready
-                          ? validationFeedback!.distanceBody
-                          : sharpState === 'checking'
-                            ? 'Checking PPI and image detail.'
-                            : `Checks effective print quality for ${selectedFormatLabel}.`,
-                      hint:
-                        ready ? validationFeedback!.distanceHint : '',
-                      icon: (
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      key: 'detail',
-                      accent: 'orange' as const,
-                      step: '02',
-                      eyebrow: 'Crop Fit',
-                      state: softState,
-                      title:
-                        ready
-                          ? validationFeedback!.detailTitle
-                          : 'Crop Fit',
-                      body:
-                        ready
-                          ? validationFeedback!.detailBody
-                          : softState === 'checking'
-                            ? 'Checking selected orientation.'
-                            : 'Checks whether the chosen crop keeps the important parts.',
-                      hint:
-                        ready ? validationFeedback!.detailHint : '',
-                      icon: (
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 7h16" />
-                          <path d="M4 12h10" />
-                          <path d="M4 17h7" />
-                          <path d="M18 13l3 3-3 3" />
-                        </svg>
-                      ),
-                    },
-                    {
-                      key: 'size',
-                      accent: 'amber' as const,
-                      step: '03',
-                      eyebrow: 'Best Pick',
-                      state: sizeState,
-                      title:
-                        ready
-                          ? validationFeedback!.sizeTitle
-                          : 'Recommendation',
-                      body:
-                        ready
-                          ? validationFeedback!.sizeBody
-                          : sizeState === 'checking'
-                            ? 'Comparing size and orientation options.'
-                            : 'Shows a safer format if this selection is not the best fit.',
-                      hint:
-                        ready ? validationFeedback!.sizeHint : '',
-                      icon: (
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 18V6" />
-                          <path d="M20 18V6" />
-                          <path d="M7 8h10" />
-                          <path d="M7 16h10" />
-                          <path d="M9 6L7 8l2 2" />
-                          <path d="M15 14l2 2-2 2" />
-                        </svg>
-                      ),
-                    },
-                  ]
-
-                  return modules.map((m, index) => (
-                    <motion.li
-                      key={m.key}
-                      className={`mib-fileTool__module mib-fileTool__module--${m.accent} is-${m.state}`}
-                      initial={shouldReduceMotion ? undefined : { opacity: 0, y: 14 }}
-                      whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
-                      whileHover={shouldReduceMotion ? undefined : { y: -2, scale: 1.008 }}
-                      viewport={{ once: true, amount: 0.55 }}
-                      transition={{ duration: 0.36, delay: 0.06 * index, ease: [0.22, 1, 0.36, 1] }}
-                    >
-                      <span className="mib-fileTool__moduleIcon" aria-hidden="true">
-                        {m.icon}
-                      </span>
-                      <div className="mib-fileTool__moduleText">
-                        <div className="mib-fileTool__moduleHead">
-                          <span className="mib-fileTool__moduleStep">{m.eyebrow}</span>
-                          <span className={`mib-fileTool__moduleStatus is-${m.state}`}>
-                            {m.state === 'checking' && (
-                              <span className="mib-fileTool__moduleStatusDots" aria-hidden="true">
-                                <span></span><span></span><span></span>
-                              </span>
-                            )}
-                            {statusLabel(m.state)}
-                          </span>
-                        </div>
-                        <p className="mib-fileTool__moduleTitle">{m.title}</p>
-                        <p className="mib-fileTool__moduleBody">{m.body}</p>
-                        {m.hint && <p className="mib-fileTool__moduleHint">{m.hint}</p>}
+                {diagnosticModules.map((module, index) => (
+                  <motion.li
+                    key={module.key}
+                    className={cx(
+                      'mib-fileTool__module',
+                      `mib-fileTool__module--${module.accent}`,
+                      `is-${module.state}`,
+                    )}
+                    initial={shouldReduceMotion ? undefined : { opacity: 0, y: 14 }}
+                    whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                    whileHover={shouldReduceMotion ? undefined : { y: -2, scale: 1.008 }}
+                    viewport={{ once: true, amount: 0.55 }}
+                    transition={{ duration: 0.36, delay: 0.06 * index, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <span className="mib-fileTool__moduleIcon" aria-hidden="true">
+                      {module.icon}
+                    </span>
+                    <div className="mib-fileTool__moduleText">
+                      <div className="mib-fileTool__moduleHead">
+                        <span className="mib-fileTool__moduleStep">{module.eyebrow}</span>
+                        <span className={cx('mib-fileTool__moduleStatus', `is-${module.state}`)}>
+                          {module.state === 'checking' && (
+                            <span className="mib-fileTool__moduleStatusDots" aria-hidden="true">
+                              <span></span><span></span><span></span>
+                            </span>
+                          )}
+                          {getDiagnosticStatusLabel(module.state, diagnosticNeedsImage)}
+                        </span>
                       </div>
-                    </motion.li>
-                  ))
-                })()}
+                      <p className="mib-fileTool__moduleTitle">{module.title}</p>
+                      <p className="mib-fileTool__moduleBody">{module.body}</p>
+                      {module.hint && <p className="mib-fileTool__moduleHint">{module.hint}</p>}
+                    </div>
+                  </motion.li>
+                ))}
               </ul>
             </aside>
           </motion.div>
@@ -970,7 +935,7 @@ export default function Home() {
                   <button
                     key={orientation.id}
                     type="button"
-                    className={`mib-pricing__orientationButton${pricingOrientation === orientation.id ? ' is-active' : ''}`}
+                    className={cx('mib-pricing__orientationButton', pricingOrientation === orientation.id && 'is-active')}
                     onClick={() => setPricingOrientation(orientation.id)}
                     aria-pressed={pricingOrientation === orientation.id}
                   >
@@ -1007,7 +972,12 @@ export default function Home() {
               return (
                 <motion.article
                   key={option.id}
-                  className={`mib-priceCard${isFeatured ? ' mib-priceCard--featured' : ''}${isActive ? ' is-active' : ''}${isSoftened ? ' is-softened' : ''}`}
+                  className={cx(
+                    'mib-priceCard',
+                    isFeatured && 'mib-priceCard--featured',
+                    isActive && 'is-active',
+                    isSoftened && 'is-softened',
+                  )}
                   tabIndex={0}
                   aria-selected={isFeatured}
                   onMouseEnter={() => setHoveredPricingSizeId(option.id)}
@@ -1075,8 +1045,8 @@ export default function Home() {
                   <p className="mib-priceCard__label">Best for</p>
                   <p className="mib-priceCard__use">{option.bestFor}</p>
                   <Link
-                    href="#hero"
-                    className={`mib-priceCard__cta${isActive ? ' mib-priceCard__cta--featured' : ''}`}
+                    href={getOrderHref(option.id, pricingOrientation)}
+                    className={cx('mib-priceCard__cta', isActive && 'mib-priceCard__cta--featured')}
                     onClick={(event) => {
                       event.stopPropagation()
                       setSelectedPricingSizeId(option.id)
