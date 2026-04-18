@@ -1100,20 +1100,20 @@ export default function Home() {
         <div className="mib-shell">
           <div className="mib-finalCta__split">
             <div className="mib-finalCta__content">
-              <span className="mib-finalCta__eyebrow">Ready when you are</span>
-              <h2 className="mib-finalCta__title">Your banner should look big before you buy it.</h2>
+              <span className="mib-finalCta__eyebrow">Ready to print</span>
+              <h2 className="mib-finalCta__title">See it first. Then order with confidence.</h2>
               <p className="mib-finalCta__copy">
-                Upload your design, preview the size, and order with a quick print-readiness check built in.
+                Upload your design, choose a size, and check the print fit before you buy.
               </p>
 
               <div className="mib-finalCta__actions">
                 <Link href="#hero" className="mib-btn mib-btn--light mib-btn--xl">
-                  <span>Start Your Banner</span>
+                  <span>Upload Your Design</span>
                 </Link>
               </div>
 
               <div className="mib-finalCta__trustRow">
-                <span className="mib-finalCta__trustMark">Reprinted if it&apos;s not right</span>
+                <span className="mib-finalCta__trustMark">Free reprint if something is not right</span>
                 <span className="mib-finalCta__trustMark">Printed in the USA</span>
                 <span className="mib-finalCta__trustMark">Ships in 3-5 days</span>
               </div>

@@ -622,6 +622,7 @@ select {
 }
 
 @keyframes mibEyebrowSheen {
+
   0%,
   14% {
     transform: translateX(-180%) rotate(14deg);
@@ -833,7 +834,7 @@ select {
   overflow: hidden;
 }
 
-.mib-fileTool > .mib-shell {
+.mib-fileTool>.mib-shell {
   position: relative;
   z-index: 2;
 }
@@ -1082,7 +1083,7 @@ select {
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
-          mask-composite: exclude;
+  mask-composite: exclude;
   pointer-events: none;
   z-index: 3;
 }
@@ -1181,10 +1182,13 @@ select {
 }
 
 @keyframes mibBubbleFloat {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0);
     opacity: 0.52;
   }
+
   50% {
     transform: translateY(-7px);
     opacity: 0.8;
@@ -1371,12 +1375,27 @@ select {
   animation: mibDotPulse 1.2s ease-in-out infinite;
 }
 
-.mib-fileTool__dots span:nth-child(2) { animation-delay: 0.18s; }
-.mib-fileTool__dots span:nth-child(3) { animation-delay: 0.36s; }
+.mib-fileTool__dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.mib-fileTool__dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
 
 @keyframes mibDotPulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.7); }
-  40% { opacity: 1; transform: scale(1); }
+
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.7);
+  }
+
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .mib-fileTool__modules {
@@ -1593,8 +1612,13 @@ select {
   animation: mibDotPulse 1.2s ease-in-out infinite;
 }
 
-.mib-fileTool__moduleStatusDots span:nth-child(2) { animation-delay: 0.18s; }
-.mib-fileTool__moduleStatusDots span:nth-child(3) { animation-delay: 0.36s; }
+.mib-fileTool__moduleStatusDots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.mib-fileTool__moduleStatusDots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
 
 .mib-fileTool__moduleTitle {
   grid-area: title;
@@ -1849,7 +1873,7 @@ select {
   overflow: hidden;
 }
 
-.mib-pricing > .mib-shell {
+.mib-pricing>.mib-shell {
   position: relative;
   z-index: 1;
 }
@@ -2231,7 +2255,7 @@ select {
   margin-bottom: 24px;
 }
 
-.mib-priceCard__header > div:first-child {
+.mib-priceCard__header>div:first-child {
   min-width: 0;
 }
 
@@ -2353,6 +2377,7 @@ select {
   line-height: 1.55;
   text-align: center;
 }
+
 /* ============================================================
    WHY MAKEITBIG -- BENTO GRID
    ============================================================ */
@@ -2649,8 +2674,8 @@ select {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  min-height: 560px;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
+  min-height: 520px;
   border-radius: 34px;
   overflow: hidden;
   background:
@@ -2678,8 +2703,8 @@ select {
   margin-bottom: 24px;
   padding: 0 15px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.13);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: rgba(255, 255, 255, 0.88);
   font-size: 11px;
   font-weight: 900;
@@ -2688,64 +2713,68 @@ select {
 }
 
 .mib-finalCta__title {
-  max-width: 11ch;
+  max-width: 12.5ch;
   margin: 0;
-  font-size: clamp(42px, 4.7vw, 70px);
-  line-height: 1.02;
+  font-size: clamp(30px, 4.25vw, 64px);
+  line-height: 1.04;
   letter-spacing: -0.04em;
   color: var(--mib-white);
 }
 
 .mib-finalCta__copy {
-  max-width: 500px;
-  margin: 22px 0 0;
+  max-width: 460px;
+  margin: 20px 0 0;
   color: rgba(255, 255, 255, 0.88);
-  font-size: 19px;
-  line-height: 1.62;
-  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.56;
+  font-weight: 600;
 }
 
 .mib-finalCta__actions {
   display: flex;
   justify-content: flex-start;
-  margin-top: 34px;
+  margin-top: 30px;
 }
 
 .mib-finalCta__trustRow {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 32px;
+  margin-top: 30px;
 }
 
 .mib-finalCta__trustMark {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.9);
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.86);
   font-size: 13px;
-  font-weight: 800;
-  white-space: nowrap;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .mib-finalCta__trustMark::before {
   content: '';
-  width: 7px;
-  height: 7px;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
   margin-right: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
+  background:
+    radial-gradient(circle at center, #ffffff 0 2px, transparent 2.5px),
+    rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
 }
 
 .mib-finalCta__visual {
   position: relative;
-  min-height: 560px;
+  min-height: 520px;
   background:
-    linear-gradient(90deg, rgba(196, 0, 54, 0.78) 0%, rgba(196, 0, 54, 0.2) 28%, rgba(255, 255, 255, 0.08) 100%),
+    linear-gradient(90deg, rgba(196, 0, 54, 0.72) 0%, rgba(196, 0, 54, 0.26) 32%, rgba(255, 255, 255, 0.18) 100%),
     url('/cta-section-bg.png') center / cover no-repeat;
   overflow: hidden;
 }
@@ -2755,8 +2784,8 @@ select {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 34%),
-    radial-gradient(circle at 80% 20%, rgba(244, 195, 61, 0.16), transparent 26%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 34%),
+    radial-gradient(circle at 80% 20%, rgba(244, 195, 61, 0.11), transparent 26%);
   pointer-events: none;
 }
 
@@ -2768,21 +2797,21 @@ select {
   z-index: 1;
   max-width: 520px;
   margin-left: auto;
-  padding: 24px 28px;
+  padding: 22px 24px;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.58);
-  box-shadow: 0 18px 46px rgba(23, 24, 28, 0.16);
+  box-shadow: 0 14px 36px rgba(23, 24, 28, 0.12);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
 .mib-finalCta__quote {
   margin: 0 0 14px;
-  color: rgba(23, 24, 28, 0.82);
-  font-size: 16px;
+  color: rgba(23, 24, 28, 0.76);
+  font-size: 15px;
   line-height: 1.58;
-  font-weight: 700;
+  font-weight: 650;
   font-style: italic;
 }
 
@@ -3349,5 +3378,568 @@ select {
 
   .mib-gallery__heading {
     font-size: 32px;
+  }
+}
+
+/* ============================================================
+   MOBILE UX PASS
+   ============================================================ */
+
+@media (max-width: 760px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  .mib-shell {
+    width: min(var(--mib-shell), calc(100% - 28px));
+  }
+
+  .mib-nav {
+    height: 64px;
+  }
+
+  .mib-nav__inner {
+    height: 64px;
+  }
+
+  .mib-nav__logo img {
+    width: 136px;
+    height: auto;
+  }
+
+  .mib-nav__help {
+    min-height: 38px;
+    padding: 0 2px;
+    font-size: 13px;
+  }
+
+  .mib-hero__bg {
+    background-size: auto 100%, 1180px auto;
+    background-position: center top, 50% 18px;
+    opacity: 0.72;
+  }
+
+  .mib-hero__content {
+    min-height: auto;
+    padding: 48px 0 58px;
+  }
+
+  .mib-hero__eyebrow {
+    height: 34px;
+    margin-bottom: 22px;
+    padding: 0 15px;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+  }
+
+  .mib-hero__title {
+    margin-bottom: 28px;
+    font-size: clamp(42px, 13vw, 70px);
+    line-height: 0.96;
+    letter-spacing: -0.055em;
+  }
+
+  .mib-hero__titleLine {
+    white-space: normal;
+    text-wrap: balance;
+  }
+
+  .mib-upload {
+    max-width: 100%;
+  }
+
+  .mib-upload__dropzone {
+    min-height: 0;
+    border-radius: 24px;
+  }
+
+  .mib-upload__glass,
+  .mib-upload__grain,
+  .mib-upload__dropzone::after {
+    border-radius: 23px;
+  }
+
+  .mib-upload__inner,
+  .mib-upload__dropzone.has-file .mib-upload__inner {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 14px;
+    min-height: 0;
+    padding: 24px 20px;
+    text-align: center;
+  }
+
+  .mib-upload__contentBlock,
+  .mib-upload__successText {
+    text-align: center;
+  }
+
+  .mib-upload__icon,
+  .mib-upload__successIcon {
+    width: 56px;
+    height: 56px;
+  }
+
+  .mib-upload__title {
+    font-size: 20px;
+  }
+
+  .mib-upload__subtext,
+  .mib-upload__successMeta {
+    font-size: 14px;
+  }
+
+  .mib-upload__button,
+  .mib-upload__nextBtn {
+    width: 100%;
+    max-width: none;
+    min-height: 54px;
+  }
+
+  .mib-upload__replaceLink {
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.86);
+    text-decoration: none;
+  }
+
+  .mib-upload__nextStep {
+    padding: 0 20px 22px;
+  }
+
+  .mib-hero__subcopy {
+    margin-top: 22px;
+    max-width: 34ch;
+    font-size: 15.5px;
+    line-height: 1.58;
+  }
+
+  .mib-proofBar {
+    padding: 14px 0;
+  }
+
+  .mib-proofBar__inner {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .mib-proofBar__stars,
+  .mib-proofBar__item {
+    justify-content: center;
+    padding: 7px 8px;
+    border-radius: 999px;
+    background: rgba(23, 24, 28, 0.035);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .mib-proofBar__item--quote {
+    display: none;
+  }
+
+  .mib-fileTool {
+    padding: 58px 0 56px;
+  }
+
+  .mib-fileTool__clouds {
+    height: 190px;
+    background-size: 960px auto;
+    opacity: 0.35;
+  }
+
+  .mib-fileTool__intro {
+    margin-bottom: 24px;
+  }
+
+  .mib-fileTool__steps {
+    max-width: 100%;
+    gap: 6px;
+    padding: 7px 10px;
+    overflow-x: auto;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
+
+  .mib-fileTool__heading {
+    font-size: clamp(34px, 10vw, 48px);
+    line-height: 1.04;
+  }
+
+  .mib-fileTool__subhead {
+    max-width: 34ch;
+    font-size: 15px;
+    line-height: 1.52;
+  }
+
+  .mib-fileTool__layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .mib-fileTool__layout::before {
+    top: 82px;
+    height: calc(100% - 22px);
+  }
+
+  .mib-fileTool__selector {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .mib-fileTool__selectorControls {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .mib-fileTool__segmented {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .mib-fileTool__segmented--orientation {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mib-fileTool__selectorButton {
+    width: 100%;
+    min-height: 42px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .mib-fileTool__upload,
+  .mib-fileTool__prompt,
+  .mib-fileTool__preview,
+  .mib-fileTool__previewCanvas,
+  .mib-fileTool__feedback,
+  .mib-fileTool__modules {
+    min-height: 0;
+  }
+
+  .mib-fileTool__upload {
+    border-radius: 26px;
+  }
+
+  .mib-fileTool__upload::before {
+    padding: 6px;
+    border-radius: 26px;
+  }
+
+  .mib-fileTool__prompt {
+    min-height: 310px;
+    padding: 38px 22px;
+  }
+
+  .mib-fileTool__promptIcon {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 14px;
+  }
+
+  .mib-fileTool__previewCanvas {
+    min-height: 330px;
+    padding: 72px 22px 62px;
+  }
+
+  .mib-fileTool__previewFrame {
+    width: min(100%, calc(260px * var(--mib-preview-ratio)));
+    max-width: 100%;
+    border-radius: 14px;
+    box-shadow:
+      0 16px 34px rgba(23, 24, 28, 0.12),
+      0 0 0 5px rgba(255, 255, 255, 0.58);
+  }
+
+  .mib-fileTool__previewHeader {
+    top: 14px;
+    left: 14px;
+    max-width: calc(100% - 28px);
+  }
+
+  .mib-fileTool__meta {
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    max-width: none;
+  }
+
+  .mib-fileTool__modules {
+    grid-template-rows: none;
+    gap: 10px;
+  }
+
+  .mib-fileTool__module {
+    grid-template-columns: 42px minmax(0, 1fr);
+    min-height: 0;
+    padding: 16px;
+    border-left-width: 5px;
+  }
+
+  .mib-fileTool__moduleIcon {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+  }
+
+  .mib-fileTool__moduleIcon svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .mib-fileTool__moduleText {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "title"
+      "body"
+      "hint"
+      "status";
+    row-gap: 6px;
+  }
+
+  .mib-fileTool__moduleStatus {
+    justify-self: start;
+    min-width: 0;
+    min-height: 28px;
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+
+  .mib-fileTool__moduleTitle {
+    font-size: 18px;
+  }
+
+  .mib-fileTool__moduleBody {
+    font-size: 13px;
+  }
+
+  .mib-pricing {
+    padding: 58px 0 64px;
+  }
+
+  .mib-pricing__topline {
+    margin-bottom: 24px;
+  }
+
+  .mib-pricing__title {
+    font-size: clamp(34px, 10vw, 48px);
+    line-height: 1.05;
+  }
+
+  .mib-pricing__note {
+    max-width: 32ch;
+    font-size: 15px;
+  }
+
+  .mib-pricing__orientation {
+    width: 100%;
+    max-width: 330px;
+  }
+
+  .mib-pricing__orientationButton {
+    flex: 1;
+    min-width: 0;
+    min-height: 42px;
+    padding: 0 12px;
+  }
+
+  .mib-pricingGrid {
+    gap: 12px;
+    max-width: 430px;
+  }
+
+  .mib-priceCard {
+    min-height: 0;
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .mib-priceCard.is-softened {
+    opacity: 1;
+    filter: none;
+  }
+
+  .mib-priceCard__badge {
+    top: 12px;
+    right: 12px;
+    height: 28px;
+    min-width: 96px;
+    font-size: 10px;
+  }
+
+  .mib-priceCard__visual {
+    height: 118px;
+    margin: 28px 0 18px;
+    border-radius: 16px;
+  }
+
+  .mib-priceCard__shape {
+    max-width: 78%;
+    max-height: 78%;
+  }
+
+  .mib-priceCard__header {
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .mib-priceCard__size {
+    font-size: 30px;
+  }
+
+  .mib-priceCard__price {
+    font-size: 34px;
+  }
+
+  .mib-priceCard__use {
+    min-height: 0;
+    margin-bottom: 18px;
+    font-size: 15px;
+  }
+
+  .mib-priceCard__cta {
+    min-height: 50px;
+  }
+
+  .mib-pricing__finePrint {
+    max-width: 30ch;
+    margin-top: 22px;
+    font-size: 12.5px;
+  }
+
+  .mib-finalCta {
+    padding: 56px 0;
+  }
+
+  .mib-finalCta__split {
+    grid-template-columns: 1fr;
+    min-height: 0;
+    border-radius: 26px;
+  }
+
+  .mib-finalCta__content {
+    padding: 36px 24px 32px;
+  }
+
+  .mib-finalCta__eyebrow {
+    height: 32px;
+    margin-bottom: 18px;
+    font-size: 10px;
+  }
+
+  .mib-finalCta__title {
+    max-width: 12ch;
+    font-size: clamp(34px, 10vw, 46px);
+  }
+
+  .mib-finalCta__copy {
+    max-width: 31ch;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+
+  .mib-finalCta__actions {
+    width: 100%;
+    margin-top: 26px;
+    justify-content: stretch;
+  }
+
+  .mib-finalCta__actions .mib-btn {
+    width: 100%;
+  }
+
+  .mib-finalCta__trustRow {
+    margin-top: 24px;
+  }
+
+  .mib-finalCta__trustMark {
+    font-size: 12.5px;
+  }
+
+  .mib-finalCta__visual {
+    min-height: 300px;
+    background-position: center;
+  }
+
+  .mib-finalCta__testimonial {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+    padding: 18px;
+  }
+
+  .mib-finalCta__quote {
+    font-size: 14px;
+  }
+
+  .mib-footer {
+    padding: 44px 0 28px;
+  }
+
+  .mib-footer__top,
+  .mib-footer__bottom {
+    gap: 24px;
+  }
+
+  .mib-footer__nav {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .mib-footer__nav a {
+    min-height: 40px;
+    padding: 9px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.055);
+  }
+}
+
+@media (max-width: 430px) {
+  .mib-shell {
+    width: min(var(--mib-shell), calc(100% - 22px));
+  }
+
+  .mib-hero__title {
+    font-size: clamp(38px, 15vw, 56px);
+  }
+
+  .mib-upload__inner,
+  .mib-upload__dropzone.has-file .mib-upload__inner {
+    padding: 22px 16px;
+  }
+
+  .mib-fileTool__steps {
+    justify-content: flex-start;
+  }
+
+  .mib-fileTool__selectorTitle {
+    font-size: 13px;
+  }
+
+  .mib-priceCard__header {
+    grid-template-columns: 1fr;
+  }
+
+  .mib-priceCard__price {
+    justify-self: start;
+    text-align: left;
+  }
+
+  .mib-finalCta__title {
+    max-width: 11ch;
+  }
+
+  .mib-proofBar__inner {
+    grid-template-columns: 1fr;
   }
 }
