@@ -1,95 +1,444 @@
-'use client'
+﻿'use client'
 
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react'
+import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion'
+import { CSSProperties, ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 
-const HOW_IT_WORKS = [
-  {
-    step: '01',
-    title: 'Upload your design',
-    body: "Drop in your file and we take it from there. PDF, PNG, or JPG.",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-        <polyline points="17 8 12 3 7 8" />
-        <line x1="12" y1="3" x2="12" y2="15" />
-      </svg>
-    ),
-  },
-  {
-    step: '02',
-    title: 'We check it for you',
-    body: "We review your file and flag anything that might not print well before you order.",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-      </svg>
-    ),
-  },
-  {
-    step: '03',
-    title: 'Preview it at full size',
-    body: 'See exactly how your banner will look before committing. No guesswork.',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-    ),
-  },
-  {
-    step: '04',
-    title: 'We print and ship fast',
-    body: 'Matte vinyl, printed in the USA. At your door in 3 to 5 days.',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="1" y="3" width="15" height="13" />
-        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-        <circle cx="5.5" cy="18.5" r="2.5" />
-        <circle cx="18.5" cy="18.5" r="2.5" />
-      </svg>
-    ),
-  },
-]
+type ValidationFeedback = {
+  sharpTone: 'good' | 'warn'
+  softnessTone: 'good' | 'warn'
+  recommendationTone: 'good' | 'warn' | 'info'
+  recommendedSizeId: PrintSizeId
+  selectedFormatLabel: string
+  distanceTitle: string
+  distanceBody: string
+  distanceHint: string
+  detailTitle: string
+  detailBody: string
+  detailHint: string
+  sizeTitle: string
+  sizeBody: string
+  sizeHint: string
+}
 
-const TRUST_BLOCKS = [
-  {
-    title: 'Smart file check',
-    body: "We review your design and let you know if anything needs attention so you're never surprised.",
-  },
-  {
-    title: 'Fast turnaround',
-    body: 'No confusing steps. No mystery delays. Just a straightforward path from upload to delivery.',
-  },
-  {
-    title: 'Reprint guarantee',
-    body: "If it doesn't look right when it arrives, we'll reprint it. No hassle.",
-  },
-  {
-    title: 'Printed in the USA',
-    body: 'Quality matte vinyl built to last, from a process you can trust.',
-  },
-]
+const BANNER_SIZES = [
+  { id: '2x3', label: '2 x 3', shortIn: 24, longIn: 36, baseAcceptablePpi: 72 },
+  { id: '3-5x6', label: '3.5 x 6', shortIn: 42, longIn: 72, baseAcceptablePpi: 56 },
+  { id: '5-5x10', label: '5.5 x 10', shortIn: 66, longIn: 120, baseAcceptablePpi: 42 },
+] as const
+
+const PRINT_ORIENTATIONS = [
+  { id: 'horizontal', label: 'Horizontal' },
+  { id: 'vertical', label: 'Vertical' },
+] as const
+
+type BannerSize = (typeof BANNER_SIZES)[number]
+type PrintSizeId = BannerSize['id']
+type PrintOrientation = (typeof PRINT_ORIENTATIONS)[number]['id']
+
+const PRICING_OPTIONS: Array<{
+  id: PrintSizeId
+  size: string
+  price: string
+  bestFor: string
+}> = [
+    {
+      id: '2x3',
+      size: '2 x 3',
+      price: '$30',
+      bestFor: 'Small booths, tabletop displays, and quick event signage.',
+    },
+    {
+      id: '3-5x6',
+      size: '3.5 x 6',
+      price: '$75',
+      bestFor: 'The easy default for booths, walls, and storefront visibility.',
+    },
+    {
+      id: '5-5x10',
+      size: '5.5 x 10',
+      price: '$150',
+      bestFor: 'Large backdrops, wide walls, and big-room impact.',
+    },
+  ]
+
+function getBannerSizeById(id: PrintSizeId) {
+  return BANNER_SIZES.find((size) => size.id === id) ?? BANNER_SIZES[0]
+}
+
+function getPricingVisualDimensions(id: PrintSizeId, orientation: PrintOrientation) {
+  const dimensions = {
+    horizontal: {
+      '2x3': { width: 126, height: 58 },
+      '3-5x6': { width: 146, height: 64 },
+      '5-5x10': { width: 166, height: 70 },
+    },
+    vertical: {
+      '2x3': { width: 48, height: 82 },
+      '3-5x6': { width: 58, height: 104 },
+      '5-5x10': { width: 68, height: 126 },
+    },
+  } satisfies Record<PrintOrientation, Record<PrintSizeId, { width: number; height: number }>>
+
+  return dimensions[orientation][id]
+}
+
+function formatBannerLabel(label: string) {
+  return label.replace(' x ', ' \u00d7 ')
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function getPrintDimensions(size: BannerSize, orientation: PrintOrientation) {
+  return {
+    widthIn: orientation === 'horizontal' ? size.longIn : size.shortIn,
+    heightIn: orientation === 'horizontal' ? size.shortIn : size.longIn,
+  }
+}
+
+function getFormatLabel(size: BannerSize, orientation: PrintOrientation) {
+  return `${formatBannerLabel(size.label)} ft ${orientation === 'horizontal' ? 'Horizontal' : 'Vertical'}`
+}
+
+function getShortFormatLabel(size: BannerSize, orientation: PrintOrientation) {
+  return `${formatBannerLabel(size.label)} ${orientation === 'horizontal' ? 'Horizontal' : 'Vertical'}`
+}
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function createFallbackFeedback(size: BannerSize, orientation: PrintOrientation): ValidationFeedback {
+  const selectedFormatLabel = getFormatLabel(size, orientation)
+
+  return {
+    sharpTone: 'warn',
+    softnessTone: 'warn',
+    recommendationTone: 'warn',
+    recommendedSizeId: size.id,
+    selectedFormatLabel,
+    distanceTitle: `Cannot Verify ${getShortFormatLabel(size, orientation)}`,
+    distanceBody: 'We could not read the image pixels, so this format needs manual review.',
+    distanceHint: 'Try a PNG or JPG',
+    detailTitle: 'Detail Check Paused',
+    detailBody: 'Upload a clearer image file so we can check crop and resolution.',
+    detailHint: 'Use an image file',
+    sizeTitle: 'Choose A Verified File',
+    sizeBody: 'We need a readable image before recommending a safer format.',
+    sizeHint: 'Upload again',
+  }
+}
+
+function analyzePrintReadiness(
+  image: HTMLImageElement,
+  selectedSize: BannerSize,
+  selectedOrientation: PrintOrientation
+): ValidationFeedback {
+  const sourceWidth = image.naturalWidth || image.width
+  const sourceHeight = image.naturalHeight || image.height
+  const sampleMax = 260
+  const sampleScale = Math.min(1, sampleMax / Math.max(sourceWidth, sourceHeight))
+  const sampleWidth = Math.max(24, Math.round(sourceWidth * sampleScale))
+  const sampleHeight = Math.max(24, Math.round(sourceHeight * sampleScale))
+  const canvas = document.createElement('canvas')
+  canvas.width = sampleWidth
+  canvas.height = sampleHeight
+
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) {
+    return createFallbackFeedback(selectedSize, selectedOrientation)
+  }
+
+  context.drawImage(image, 0, 0, sampleWidth, sampleHeight)
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight)
+  const luminance = new Float32Array(sampleWidth * sampleHeight)
+  let luminanceSum = 0
+  let skinPixels = 0
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    const r = data[i]
+    const g = data[i + 1]
+    const b = data[i + 2]
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    luminance[p] = lum
+    luminanceSum += lum
+
+    const maxChannel = Math.max(r, g, b)
+    const minChannel = Math.min(r, g, b)
+    if (r > 95 && g > 40 && b > 20 && maxChannel - minChannel > 15 && Math.abs(r - g) > 15 && r > g && r > b) {
+      skinPixels += 1
+    }
+  }
+
+  const pixelCount = sampleWidth * sampleHeight
+  const meanLum = luminanceSum / pixelCount
+  let varianceSum = 0
+  let edgePixels = 0
+  let fineEdgePixels = 0
+
+  for (let i = 0; i < luminance.length; i += 1) {
+    const delta = luminance[i] - meanLum
+    varianceSum += delta * delta
+  }
+
+  for (let y = 1; y < sampleHeight - 1; y += 1) {
+    for (let x = 1; x < sampleWidth - 1; x += 1) {
+      const index = y * sampleWidth + x
+      const dx = Math.abs(luminance[index + 1] - luminance[index - 1])
+      const dy = Math.abs(luminance[index + sampleWidth] - luminance[index - sampleWidth])
+      const edge = dx + dy
+      if (edge > 46) edgePixels += 1
+      if (edge > 26) fineEdgePixels += 1
+    }
+  }
+
+  const contrast = Math.sqrt(varianceSum / pixelCount)
+  const measuredPixels = Math.max(1, (sampleWidth - 2) * (sampleHeight - 2))
+  const edgeDensity = edgePixels / measuredPixels
+  const fineDetailDensity = fineEdgePixels / measuredPixels
+  const skinRatio = skinPixels / pixelCount
+  const textSensitivity = clamp((fineDetailDensity - 0.16) / 0.22 + (contrast - 42) / 70, 0, 1)
+  const isDenseArtwork = edgeDensity > 0.22 || (fineDetailDensity > 0.34 && contrast > 58)
+  const isDetailedArtwork = !isDenseArtwork && (edgeDensity > 0.13 || fineDetailDensity > 0.24)
+  const likelyPeoplePhoto = skinRatio > 0.025 && !isDenseArtwork
+  const contentMultiplier = isDenseArtwork ? 1.36 : isDetailedArtwork ? 1.16 : likelyPeoplePhoto ? 0.96 : 0.9
+  const detailMultiplier = textSensitivity > 0.66 ? 1.16 : 1
+  const imageAspect = sourceWidth / sourceHeight
+  const imageIsWide = imageAspect > 1.12
+  const imageIsTall = imageAspect < 0.88
+
+  const scoreFormat = (size: BannerSize, orientation: PrintOrientation) => {
+    const { widthIn, heightIn } = getPrintDimensions(size, orientation)
+    const targetAspect = widthIn / heightIn
+    const cropRetained = clamp(Math.min(imageAspect / targetAspect, targetAspect / imageAspect), 0, 1)
+    const ppi = Math.min(sourceWidth / widthIn, sourceHeight / heightIn)
+    const acceptablePpi = size.baseAcceptablePpi * contentMultiplier * detailMultiplier
+    const idealPpi = acceptablePpi + 22 * contentMultiplier
+    const qualityRating = ppi >= idealPpi ? 'good' : ppi >= acceptablePpi ? 'ok' : 'poor'
+    const fitRating = cropRetained >= 0.86 ? 'good' : cropRetained >= 0.7 ? 'ok' : 'poor'
+    const naturalOrientation =
+      (!imageIsWide && !imageIsTall) ||
+      (imageIsWide && orientation === 'horizontal') ||
+      (imageIsTall && orientation === 'vertical')
+    const qualityScore = clamp(ppi / idealPpi, 0, 1.35)
+    const fitScore = cropRetained
+    const total = qualityScore * 0.58 + fitScore * 0.34 + (naturalOrientation ? 0.08 : 0)
+
+    return {
+      size,
+      orientation,
+      widthIn,
+      heightIn,
+      targetAspect,
+      cropRetained,
+      ppi,
+      acceptablePpi,
+      idealPpi,
+      qualityRating,
+      fitRating,
+      naturalOrientation,
+      total,
+    }
+  }
+
+  const selectedScore = scoreFormat(selectedSize, selectedOrientation)
+  const formatScores = BANNER_SIZES.flatMap((size) =>
+    PRINT_ORIENTATIONS.map((orientation) => scoreFormat(size, orientation.id))
+  )
+  const selectedFormatLabel = getFormatLabel(selectedSize, selectedOrientation)
+  const selectedShortLabel = getShortFormatLabel(selectedSize, selectedOrientation)
+  const selectedPpi = Math.round(selectedScore.ppi)
+  const cropPercent = Math.round(selectedScore.cropRetained * 100)
+  const cropLossPercent = Math.max(0, 100 - cropPercent)
+  const qualityNeedsFix = selectedScore.qualityRating === 'poor'
+  const fitNeedsFix = selectedScore.fitRating === 'poor'
+  const selectedNeedsAlternative = qualityNeedsFix || fitNeedsFix
+
+  const betterScores = formatScores
+    .filter((score) => score.size.id !== selectedSize.id || score.orientation !== selectedOrientation)
+    .sort((a, b) => b.total - a.total)
+  const sameSizeOtherOrientation = formatScores.find(
+    (score) => score.size.id === selectedSize.id && score.orientation !== selectedOrientation
+  )
+  const recommendedScore =
+    betterScores.find((score) => score.qualityRating !== 'poor' && score.fitRating !== 'poor') ??
+    betterScores[0] ??
+    selectedScore
+  const recommendedLabel = getFormatLabel(recommendedScore.size, recommendedScore.orientation)
+  const recommendedShortLabel = getShortFormatLabel(recommendedScore.size, recommendedScore.orientation)
+
+  const contentReason = isDenseArtwork
+    ? 'Dense artwork or small text needs more resolution than a simple photo.'
+    : likelyPeoplePhoto
+      ? 'Fine facial detail is the first thing to soften when the print gets too large.'
+      : isDetailedArtwork
+        ? 'Fine lines and small details need a little extra pixel room.'
+        : 'This is a simpler image, so it can tolerate normal banner viewing distance.'
+
+  const qualityTitle = qualityNeedsFix
+    ? `Too Soft For ${selectedShortLabel}`
+    : selectedScore.qualityRating === 'ok'
+      ? `Usable For ${selectedShortLabel}`
+      : `Ready For ${selectedShortLabel}`
+  const qualityBody = qualityNeedsFix
+    ? `About ${selectedPpi} PPI at this size. ${contentReason}`
+    : selectedScore.qualityRating === 'ok'
+      ? `About ${selectedPpi} PPI. It should read from distance, but close-up detail may soften.`
+      : `About ${selectedPpi} PPI. Strong enough for this selected banner size.`
+
+  const orientationLabel = selectedOrientation === 'horizontal' ? 'Horizontal' : 'Vertical'
+  const fitTitle = fitNeedsFix
+    ? `${orientationLabel} Crop Is Tight`
+    : selectedScore.fitRating === 'ok'
+      ? `${orientationLabel} Crop Needs Care`
+      : `${orientationLabel} Crop Works`
+  const fitBody = fitNeedsFix
+    ? `This crop may cut away about ${cropLossPercent}% of the image. Important text or faces could land too close to the edge.`
+    : selectedScore.fitRating === 'ok'
+      ? `This crop keeps about ${cropPercent}% of the image. Keep key details away from the edges.`
+      : 'The image matches this format naturally with very little crop risk.'
+  const fitHint =
+    sameSizeOtherOrientation && sameSizeOtherOrientation.cropRetained > selectedScore.cropRetained + 0.1
+      ? `Try ${sameSizeOtherOrientation.orientation === 'horizontal' ? 'Horizontal' : 'Vertical'}`
+      : fitNeedsFix
+        ? 'Reframe before ordering'
+        : ''
+
+  const recommendationTitle = selectedNeedsAlternative
+    ? `Try ${recommendedShortLabel}`
+    : selectedScore.qualityRating === 'ok' || selectedScore.fitRating === 'ok'
+      ? 'Selected Format Works'
+      : 'Selected Format Is Best'
+  const recommendationBody = selectedNeedsAlternative
+    ? `${recommendedLabel} gives about ${Math.round(recommendedScore.ppi)} PPI and keeps ${Math.round(recommendedScore.cropRetained * 100)}% of the image.`
+    : selectedScore.qualityRating === 'ok' || selectedScore.fitRating === 'ok'
+      ? 'This choice is acceptable. Use a higher-res file if you want extra crisp close-up detail.'
+      : 'This is the cleanest match for the file, size, and orientation you selected.'
+
+  return {
+    sharpTone: qualityNeedsFix ? 'warn' : 'good',
+    softnessTone: fitNeedsFix ? 'warn' : 'good',
+    recommendationTone: selectedNeedsAlternative ? 'warn' : selectedScore.qualityRating === 'ok' || selectedScore.fitRating === 'ok' ? 'info' : 'good',
+    recommendedSizeId: selectedNeedsAlternative ? recommendedScore.size.id : selectedSize.id,
+    selectedFormatLabel,
+    distanceTitle: qualityTitle,
+    distanceBody: qualityBody,
+    distanceHint: qualityNeedsFix ? 'Use a higher-res file or smaller size' : selectedScore.qualityRating === 'ok' ? 'Good from normal distance' : '',
+    detailTitle: fitTitle,
+    detailBody: fitBody,
+    detailHint: fitHint,
+    sizeTitle: recommendationTitle,
+    sizeBody: recommendationBody,
+    sizeHint: selectedNeedsAlternative ? 'Better fit and quality' : selectedFormatLabel,
+  }
+}
 export default function Home() {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const dropzoneRef = useRef<HTMLLabelElement | null>(null)
+  const confidenceInputRef = useRef<HTMLInputElement | null>(null)
+  const fileToolRef = useRef<HTMLElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [isConfidenceDragging, setIsConfidenceDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedPrintSizeId, setSelectedPrintSizeId] = useState<PrintSizeId>('2x3')
+  const [selectedOrientation, setSelectedOrientation] = useState<PrintOrientation>('horizontal')
+  const [selectedPricingSizeId, setSelectedPricingSizeId] = useState<PrintSizeId | null>(null)
+  const [hoveredPricingSizeId, setHoveredPricingSizeId] = useState<PrintSizeId | null>(null)
+  const [pricingOrientation, setPricingOrientation] = useState<PrintOrientation>('horizontal')
+  const [isCheckingFile, setIsCheckingFile] = useState(false)
+  const [validationFeedback, setValidationFeedback] = useState<ValidationFeedback | null>(null)
+  const shouldReduceMotion = useReducedMotion()
+  const { scrollYProgress: fileToolScroll } = useScroll({
+    target: fileToolRef,
+    offset: ['start end', 'end start'],
+  })
+  const cloudNearX = useTransform(fileToolScroll, [0, 1], [-90, 90])
+  const cloudFarX = useTransform(fileToolScroll, [0, 1], [70, -70])
+  const selectedPrintSize = getBannerSizeById(selectedPrintSizeId)
+  const selectedPrintDimensions = getPrintDimensions(selectedPrintSize, selectedOrientation)
+  const selectedFormatLabel = getFormatLabel(selectedPrintSize, selectedOrientation)
+  const featuredPricingSizeId = validationFeedback?.recommendedSizeId ?? '3-5x6'
+  const pickedPricingSizeId = selectedPricingSizeId ?? featuredPricingSizeId
+  const activePricingSizeId = hoveredPricingSizeId ?? pickedPricingSizeId
+  const previewAspectStyle = {
+    '--mib-preview-aspect': `${selectedPrintDimensions.widthIn} / ${selectedPrintDimensions.heightIn}`,
+    '--mib-preview-ratio': selectedPrintDimensions.widthIn / selectedPrintDimensions.heightIn,
+  } as CSSProperties
 
   const fileMeta = useMemo(() => {
     if (!selectedFile) return null
-    return `${selectedFile.name} · ${formatFileSize(selectedFile.size)}`
+    return `${selectedFile.name} - ${formatFileSize(selectedFile.size)}`
   }, [selectedFile])
+  const previewUrl = useMemo(
+    () => (selectedFile ? URL.createObjectURL(selectedFile) : null),
+    [selectedFile]
+  )
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
+
+  useEffect(() => {
+    if (!selectedFile || !previewUrl || !selectedFile.type.startsWith('image/')) {
+      let cancelled = false
+      queueMicrotask(() => {
+        if (cancelled) return
+        setIsCheckingFile(false)
+        setValidationFeedback(null)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    queueMicrotask(() => {
+      if (cancelled) return
+      setIsCheckingFile(true)
+      setValidationFeedback(null)
+    })
+
+    const imageProbe = new window.Image()
+    imageProbe.onload = () => {
+      if (cancelled) return
+
+      const feedback = analyzePrintReadiness(imageProbe, selectedPrintSize, selectedOrientation)
+
+      timer = setTimeout(() => {
+        if (cancelled) return
+        setValidationFeedback(feedback)
+        setIsCheckingFile(false)
+      }, 520)
+    }
+
+    imageProbe.onerror = () => {
+      if (cancelled) return
+      timer = setTimeout(() => {
+        if (cancelled) return
+        setValidationFeedback(createFallbackFeedback(selectedPrintSize, selectedOrientation))
+        setIsCheckingFile(false)
+      }, 420)
+    }
+
+    imageProbe.src = previewUrl
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [selectedFile, previewUrl, selectedPrintSize, selectedOrientation])
+
+  const isImageFile = selectedFile?.type.startsWith('image/') ?? false
 
   function handleFile(file: File | null) {
     if (!file) return
@@ -118,6 +467,33 @@ export default function Home() {
     handleFile(file)
   }
 
+  function handleConfidenceFile(file: File | null) {
+    if (!file || !file.type.startsWith('image/')) return
+    setSelectedFile(file)
+  }
+
+  function handleConfidenceInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null
+    handleConfidenceFile(file)
+  }
+
+  function handleConfidenceDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault()
+    setIsConfidenceDragging(true)
+  }
+
+  function handleConfidenceDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault()
+    setIsConfidenceDragging(false)
+  }
+
+  function handleConfidenceDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault()
+    setIsConfidenceDragging(false)
+    const file = event.dataTransfer.files?.[0] ?? null
+    handleConfidenceFile(file)
+  }
+
   function handleContinue() {
     router.push('/order')
   }
@@ -140,7 +516,7 @@ export default function Home() {
   return (
     <main className="mib-home">
 
-      {/* ── STICKY NAV ───────────────────────────────────── */}
+      {/* STICKY NAV */}
       <header className="mib-nav">
         <div className="mib-shell mib-nav__inner">
           <Link href="/" className="mib-nav__logo">
@@ -149,31 +525,27 @@ export default function Home() {
               alt="MakeItBig"
               width={160}
               height={49}
+              style={{ filter: 'brightness(0) invert(1)' }}
               priority
             />
           </Link>
-          <nav className="mib-nav__links" aria-label="Primary">
-            <Link href="#how-it-works" className="mib-nav__link">How It Works</Link>
-            <Link href="#pricing" className="mib-nav__link">Pricing</Link>
-            <Link href="#gallery" className="mib-nav__link">Examples</Link>
-            <Link href="#hero" className="mib-nav__cta">Start Your Banner</Link>
+          <nav className="mib-nav__links" aria-label="Support">
+            <Link href="#pricing" className="mib-nav__help">Pricing</Link>
           </nav>
         </div>
       </header>
 
-      {/* ── HERO ─────────────────────────────────────────── */}
+      {/* HERO */}
       <section className="mib-hero" id="hero">
         <div className="mib-hero__top">
+          <div className="mib-hero__bg" aria-hidden="true" />
           <div className="mib-shell">
             <div className="mib-hero__content">
-              <p className="mib-hero__eyebrow">Banner Printing, Made Simple</p>
+              <p className="mib-hero__eyebrow">Upload. Preview. Print.</p>
 
               <h1 className="mib-hero__title">
-                Your design.
-                <br />
-                Big and impossible
-                <br />
-                to ignore.
+                <span className="mib-hero__titleLine mib-hero__titleLine--first">MAKE IT BIG.</span>
+                <span className="mib-hero__titleLine mib-hero__titleLine--second">PUT IT WHERE IT MATTERS.</span>
               </h1>
 
               <div className="mib-upload">
@@ -210,7 +582,7 @@ export default function Home() {
                       </div>
                       <div className="mib-upload__contentBlock">
                         <p className="mib-upload__title">Drag and drop your design</p>
-                        <p className="mib-upload__subtext">or click to upload — we'll guide you from there</p>
+                        <p className="mib-upload__subtext">or click to upload - we&apos;ll guide you from there</p>
                       </div>
                       <span className="mib-upload__button">Choose File</span>
                     </div>
@@ -256,14 +628,14 @@ export default function Home() {
               </div>
 
               <p className="mib-hero__subcopy">
-                Upload your file. We check it, preview it at full size, then print and ship it fast. No confusing steps, no surprises.
+                Upload your file and we take it from there. We check it, show you a full-size preview, then print and ship fast.
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ── SOCIAL PROOF BAR ─────────────────────────────── */}
+      {/* SOCIAL PROOF BAR */}
       <div className="mib-proofBar">
         <div className="mib-shell mib-proofBar__inner">
           <span className="mib-proofBar__stars">
@@ -281,248 +653,485 @@ export default function Home() {
           <span className="mib-proofBar__divider" aria-hidden="true" />
           <span className="mib-proofBar__item">Ships in 3-5 Days</span>
           <span className="mib-proofBar__divider" aria-hidden="true" />
-          <span className="mib-proofBar__item">Reprinted if it's not right</span>
+          <span className="mib-proofBar__item">Reprinted if it&apos;s not right</span>
           <span className="mib-proofBar__divider" aria-hidden="true" />
           <span className="mib-proofBar__item mib-proofBar__item--quote">
-            "Exactly what I needed for my booth." Sarah M., Phoenix AZ
+            &quot;Exactly what I needed for my booth.&quot; Sarah M., Phoenix AZ
           </span>
         </div>
       </div>
 
-      {/* ── HOW IT WORKS ─────────────────────────────────── */}
-      <section className="mib-section mib-hiw" id="how-it-works">
+      {/* FILE CONFIDENCE TOOL */}
+      <section ref={fileToolRef} className="mib-fileTool" id="file-confidence">
+        <motion.div
+          className="mib-fileTool__clouds mib-fileTool__clouds--far"
+          aria-hidden="true"
+          style={{ x: shouldReduceMotion ? 0 : cloudFarX }}
+        />
+        <motion.div
+          className="mib-fileTool__clouds mib-fileTool__clouds--near"
+          aria-hidden="true"
+          style={{ x: shouldReduceMotion ? 0 : cloudNearX }}
+        />
         <div className="mib-shell">
-          <div className="mib-sectionIntro mib-sectionIntro--center">
-            <h2 className="mib-sectionIntro__title">Four steps. That's all.</h2>
-          </div>
+          <motion.div
+            className="mib-fileTool__intro"
+            initial={shouldReduceMotion ? undefined : { opacity: 0, y: 20 }}
+            whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+            viewport={{ once: true, amount: 0.4 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="mib-fileTool__steps" aria-label="Upload, check, then print">
+              <span className="mib-fileTool__step">Upload</span>
+              <svg className="mib-fileTool__stepArrow" aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+              <span className="mib-fileTool__step mib-fileTool__step--active">Check</span>
+              <svg className="mib-fileTool__stepArrow" aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+              <span className="mib-fileTool__step">Print</span>
+            </div>
 
-          <div className="mib-hiwGrid">
-            {HOW_IT_WORKS.map((item) => (
-              <article key={item.title} className="mib-hiwCard">
-                <div className="mib-hiwCard__stepIcon" aria-hidden="true">
-                  {item.icon}
+            <h2 className="mib-fileTool__heading">
+              Check Your File <span className="mib-fileTool__mark">Before</span> You Print.
+            </h2>
+
+            <p className="mib-fileTool__subhead">
+              Upload your design, we run 3 quick checks, and you avoid bad prints before you buy.
+            </p>
+          </motion.div>
+
+          <motion.div
+            className="mib-fileTool__layout"
+            initial={shouldReduceMotion ? undefined : { opacity: 0, y: 24 }}
+            whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+            viewport={{ once: true, amount: 0.3 }}
+            transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="mib-fileTool__selector" aria-label="Choose print size and orientation">
+              <div className="mib-fileTool__selectorIntro">
+                <span className="mib-fileTool__selectorKicker">Print format</span>
+                <p className="mib-fileTool__selectorTitle">Choose your size and crop before we score the file.</p>
+              </div>
+              <div className="mib-fileTool__selectorControls">
+                <div className="mib-fileTool__segmented" aria-label="Banner size">
+                  {BANNER_SIZES.map((size) => (
+                    <button
+                      key={size.id}
+                      type="button"
+                      className={`mib-fileTool__selectorButton${selectedPrintSizeId === size.id ? ' is-active' : ''}`}
+                      onClick={() => setSelectedPrintSizeId(size.id)}
+                      aria-pressed={selectedPrintSizeId === size.id}
+                    >
+                      {formatBannerLabel(size.label)}
+                    </button>
+                  ))}
                 </div>
-                <div className="mib-hiwCard__num" aria-hidden="true">
-                  {item.step}
+                <div className="mib-fileTool__segmented mib-fileTool__segmented--orientation" aria-label="Banner orientation">
+                  {PRINT_ORIENTATIONS.map((orientation) => (
+                    <button
+                      key={orientation.id}
+                      type="button"
+                      className={`mib-fileTool__selectorButton${selectedOrientation === orientation.id ? ' is-active' : ''}`}
+                      onClick={() => setSelectedOrientation(orientation.id)}
+                      aria-pressed={selectedOrientation === orientation.id}
+                    >
+                      {orientation.label}
+                    </button>
+                  ))}
                 </div>
-                <h3 className="mib-hiwCard__title">{item.title}</h3>
-                <p className="mib-hiwCard__body">{item.body}</p>
-              </article>
-            ))}
-          </div>
+              </div>
+            </div>
+
+            <label
+              className={`mib-fileTool__upload${isConfidenceDragging ? ' is-dragging' : ''}`}
+              onDragOver={handleConfidenceDragOver}
+              onDragLeave={handleConfidenceDragLeave}
+              onDrop={handleConfidenceDrop}
+            >
+              <input
+                ref={confidenceInputRef}
+                type="file"
+                accept="image/*"
+                className="mib-fileTool__input"
+                onChange={handleConfidenceInputChange}
+              />
+              {previewUrl && isImageFile ? (
+                <>
+                  <div className="mib-fileTool__previewHeader">
+                    <span className="mib-fileTool__previewLabel">Uploaded file preview</span>
+                    <span className="mib-fileTool__previewSub">{selectedFormatLabel} crop check</span>
+                  </div>
+                  <div className="mib-fileTool__previewCanvas">
+                    <div className="mib-fileTool__previewFrame" style={previewAspectStyle}>
+                      <img
+                        src={previewUrl}
+                        alt={selectedFile ? `${selectedFile.name} preview` : 'Uploaded image preview'}
+                        className="mib-fileTool__preview"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="mib-fileTool__prompt">
+                  <span className="mib-fileTool__bubbles" aria-hidden="true">
+                    <span className="mib-fileTool__bubble mib-fileTool__bubble--one" />
+                    <span className="mib-fileTool__bubble mib-fileTool__bubble--two" />
+                    <span className="mib-fileTool__bubble mib-fileTool__bubble--three" />
+                  </span>
+                  <span className="mib-fileTool__promptIcon" aria-hidden="true">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </span>
+                  <p className="mib-fileTool__promptTitle">Upload your design to run a print-readiness check.</p>
+                  <p className="mib-fileTool__promptText">Selected format: {selectedFormatLabel}. We will preview the crop here.</p>
+                </div>
+              )}
+              {fileMeta && (
+                <p className="mib-fileTool__meta">
+                  <span className="mib-fileTool__metaDot" aria-hidden="true" />
+                  {fileMeta}
+                </p>
+              )}
+            </label>
+
+            <aside className="mib-fileTool__feedback" aria-live="polite">
+              <ul className="mib-fileTool__modules">
+                {(() => {
+                  type ModuleState = 'idle' | 'checking' | 'good' | 'warn' | 'info'
+                  const ready = isImageFile && !isCheckingFile && !!validationFeedback
+                  const running = isImageFile && isCheckingFile
+                  const blocked = !!selectedFile && !isImageFile
+
+                  const sharpState: ModuleState = running
+                    ? 'checking'
+                    : ready
+                      ? validationFeedback!.sharpTone === 'good' ? 'good' : 'warn'
+                      : 'idle'
+                  const softState: ModuleState = running
+                    ? 'checking'
+                    : ready
+                      ? validationFeedback!.softnessTone === 'good' ? 'good' : 'warn'
+                      : 'idle'
+                  const sizeState: ModuleState = running
+                    ? 'checking'
+                    : ready
+                      ? validationFeedback!.recommendationTone
+                      : 'idle'
+
+                  const statusLabel = (s: ModuleState) => {
+                    if (s === 'checking') return 'Checking'
+                    if (s === 'good') return 'Ready'
+                    if (s === 'warn') return 'Needs Fix'
+                    if (s === 'info') return 'Ready'
+                    return blocked ? 'Image Needed' : 'Runs after upload'
+                  }
+
+                  const modules = [
+                    {
+                      key: 'sharp',
+                      accent: 'red' as const,
+                      step: '01',
+                      eyebrow: 'Quality',
+                      state: sharpState,
+                      title:
+                        ready
+                          ? validationFeedback!.distanceTitle
+                          : 'Selected Size Quality',
+                      body:
+                        ready
+                          ? validationFeedback!.distanceBody
+                          : sharpState === 'checking'
+                            ? 'Checking PPI and image detail.'
+                            : `Checks effective print quality for ${selectedFormatLabel}.`,
+                      hint:
+                        ready ? validationFeedback!.distanceHint : '',
+                      icon: (
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      key: 'detail',
+                      accent: 'orange' as const,
+                      step: '02',
+                      eyebrow: 'Crop Fit',
+                      state: softState,
+                      title:
+                        ready
+                          ? validationFeedback!.detailTitle
+                          : 'Crop Fit',
+                      body:
+                        ready
+                          ? validationFeedback!.detailBody
+                          : softState === 'checking'
+                            ? 'Checking selected orientation.'
+                            : 'Checks whether the chosen crop keeps the important parts.',
+                      hint:
+                        ready ? validationFeedback!.detailHint : '',
+                      icon: (
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 7h16" />
+                          <path d="M4 12h10" />
+                          <path d="M4 17h7" />
+                          <path d="M18 13l3 3-3 3" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      key: 'size',
+                      accent: 'amber' as const,
+                      step: '03',
+                      eyebrow: 'Best Pick',
+                      state: sizeState,
+                      title:
+                        ready
+                          ? validationFeedback!.sizeTitle
+                          : 'Recommendation',
+                      body:
+                        ready
+                          ? validationFeedback!.sizeBody
+                          : sizeState === 'checking'
+                            ? 'Comparing size and orientation options.'
+                            : 'Shows a safer format if this selection is not the best fit.',
+                      hint:
+                        ready ? validationFeedback!.sizeHint : '',
+                      icon: (
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 18V6" />
+                          <path d="M20 18V6" />
+                          <path d="M7 8h10" />
+                          <path d="M7 16h10" />
+                          <path d="M9 6L7 8l2 2" />
+                          <path d="M15 14l2 2-2 2" />
+                        </svg>
+                      ),
+                    },
+                  ]
+
+                  return modules.map((m, index) => (
+                    <motion.li
+                      key={m.key}
+                      className={`mib-fileTool__module mib-fileTool__module--${m.accent} is-${m.state}`}
+                      initial={shouldReduceMotion ? undefined : { opacity: 0, y: 14 }}
+                      whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                      whileHover={shouldReduceMotion ? undefined : { y: -2, scale: 1.008 }}
+                      viewport={{ once: true, amount: 0.55 }}
+                      transition={{ duration: 0.36, delay: 0.06 * index, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <span className="mib-fileTool__moduleIcon" aria-hidden="true">
+                        {m.icon}
+                      </span>
+                      <div className="mib-fileTool__moduleText">
+                        <div className="mib-fileTool__moduleHead">
+                          <span className="mib-fileTool__moduleStep">{m.eyebrow}</span>
+                          <span className={`mib-fileTool__moduleStatus is-${m.state}`}>
+                            {m.state === 'checking' && (
+                              <span className="mib-fileTool__moduleStatusDots" aria-hidden="true">
+                                <span></span><span></span><span></span>
+                              </span>
+                            )}
+                            {statusLabel(m.state)}
+                          </span>
+                        </div>
+                        <p className="mib-fileTool__moduleTitle">{m.title}</p>
+                        <p className="mib-fileTool__moduleBody">{m.body}</p>
+                        {m.hint && <p className="mib-fileTool__moduleHint">{m.hint}</p>}
+                      </div>
+                    </motion.li>
+                  ))
+                })()}
+              </ul>
+            </aside>
+          </motion.div>
         </div>
       </section>
 
-      {/* ── PRICING ──────────────────────────────────────── */}
-      <section className="mib-section mib-pricing" id="pricing">
+      {/* PRICING */}
+      <section className="mib-pricing mib-pricing--selector" id="pricing">
         <div className="mib-shell">
-          <div className="mib-sectionIntro mib-sectionIntro--center">
-            <h2 className="mib-sectionIntro__title">Simple, flat pricing</h2>
-            <p className="mib-sectionIntro__copy mib-sectionIntro__copy--center">Pick your size. That's it.</p>
+          <div className="mib-pricing__topline">
+            <div>
+              <span className="mib-pricing__eyebrow">Pricing selector</span>
+              <h2 className="mib-pricing__title">
+                Choose Your <span className="mib-pricing__mark">Size</span>. That&apos;s it.
+              </h2>
+            </div>
+            <div className="mib-pricing__side">
+              <p className="mib-pricing__note">Every size is available horizontal or vertical. Pick the one that fits your space.</p>
+              <div className="mib-pricing__orientation" aria-label="Preview orientation">
+                {PRINT_ORIENTATIONS.map((orientation) => (
+                  <button
+                    key={orientation.id}
+                    type="button"
+                    className={`mib-pricing__orientationButton${pricingOrientation === orientation.id ? ' is-active' : ''}`}
+                    onClick={() => setPricingOrientation(orientation.id)}
+                    aria-pressed={pricingOrientation === orientation.id}
+                  >
+                    {orientation.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="mib-pricingGrid">
-            <article className="mib-priceCard">
-              <div className="mib-priceCard__size">24" x 36" inches</div>
-              <div className="mib-priceCard__price">$30</div>
-              <p className="mib-priceCard__shipping">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M9 12l2 2 4-4" />
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
-                Shipping included
-              </p>
-              <p className="mib-priceCard__use">Great for trade show booths, events, and smaller spaces</p>
-              <Link href="#hero" className="mib-priceCard__cta">Order This Size</Link>
-            </article>
+          <motion.div
+            className="mib-pricingGrid"
+            aria-label="Banner pricing options"
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, amount: 0.28 }}
+            variants={{
+              hidden: {},
+              visible: {
+                transition: {
+                  staggerChildren: 0.08,
+                  delayChildren: 0.04,
+                },
+              },
+            }}
+          >
+            {PRICING_OPTIONS.map((option) => {
+              const visualDimensions = getPricingVisualDimensions(option.id, pricingOrientation)
+              const isFeatured = option.id === pickedPricingSizeId
+              const isActive = option.id === activePricingSizeId
+              const isSoftened = option.id !== activePricingSizeId
+              const featuredLabel = validationFeedback ? 'Checker pick' : 'Most popular'
 
-            <article className="mib-priceCard mib-priceCard--featured">
-              <span className="mib-priceCard__badge">Most Popular</span>
-              <div className="mib-priceCard__size">36" x 72" inches</div>
-              <div className="mib-priceCard__price">$75</div>
-              <p className="mib-priceCard__shipping">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M9 12l2 2 4-4" />
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
-                Shipping included
-              </p>
-              <p className="mib-priceCard__use">Strong street-level visibility without going overboard</p>
-              <Link href="#hero" className="mib-priceCard__cta mib-priceCard__cta--featured">Order This Size</Link>
-            </article>
-
-            <article className="mib-priceCard">
-              <div className="mib-priceCard__size">48" x 96" inches</div>
-              <div className="mib-priceCard__price">$150</div>
-              <p className="mib-priceCard__shipping">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M9 12l2 2 4-4" />
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
-                Shipping included
-              </p>
-              <p className="mib-priceCard__use">Maximum presence. When you need to fill a wall or a room</p>
-              <Link href="#hero" className="mib-priceCard__cta">Order This Size</Link>
-            </article>
-          </div>
+              return (
+                <motion.article
+                  key={option.id}
+                  className={`mib-priceCard${isFeatured ? ' mib-priceCard--featured' : ''}${isActive ? ' is-active' : ''}${isSoftened ? ' is-softened' : ''}`}
+                  tabIndex={0}
+                  aria-selected={isFeatured}
+                  onMouseEnter={() => setHoveredPricingSizeId(option.id)}
+                  onMouseLeave={() => setHoveredPricingSizeId(null)}
+                  onFocus={() => setHoveredPricingSizeId(option.id)}
+                  onBlur={() => setHoveredPricingSizeId(null)}
+                  onClick={() => setSelectedPricingSizeId(option.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setSelectedPricingSizeId(option.id)
+                    }
+                  }}
+                  variants={{
+                    hidden: { opacity: 0, y: 20, scale: 0.98 },
+                    visible: {
+                      opacity: 1,
+                      y: 0,
+                      scale: 1,
+                      transition: {
+                        duration: 0.42,
+                        delay: option.id === '3-5x6' ? 0.08 : 0,
+                        ease: [0.22, 1, 0.36, 1],
+                      },
+                    },
+                  }}
+                  animate={shouldReduceMotion ? undefined : {
+                    y: isActive ? -5 : 0,
+                    scale: isActive ? 1.014 : 1,
+                  }}
+                  whileHover={shouldReduceMotion ? undefined : { y: -6, scale: 1.016 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 260,
+                    damping: 24,
+                  }}
+                >
+                  {isFeatured && <span className="mib-priceCard__badge">{featuredLabel}</span>}
+                  <div className="mib-priceCard__visual" aria-hidden="true">
+                    <motion.div
+                      className="mib-priceCard__shape"
+                      animate={{
+                        width: visualDimensions.width,
+                        height: visualDimensions.height,
+                      }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 230,
+                        damping: 22,
+                      }}
+                    >
+                      <span className="mib-priceCard__shapeLine mib-priceCard__shapeLine--top" />
+                      <span className="mib-priceCard__shapeLine mib-priceCard__shapeLine--side" />
+                    </motion.div>
+                  </div>
+                  <div className="mib-priceCard__header">
+                    <div>
+                      <span className="mib-priceCard__size">{formatBannerLabel(option.size)} ft</span>
+                      <p className="mib-priceCard__availability">
+                        {pricingOrientation === 'horizontal' ? 'Horizontal preview' : 'Vertical preview'}
+                      </p>
+                    </div>
+                    <div className="mib-priceCard__price">{option.price}</div>
+                  </div>
+                  <p className="mib-priceCard__label">Best for</p>
+                  <p className="mib-priceCard__use">{option.bestFor}</p>
+                  <Link
+                    href="#hero"
+                    className={`mib-priceCard__cta${isActive ? ' mib-priceCard__cta--featured' : ''}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setSelectedPricingSizeId(option.id)
+                    }}
+                  >
+                    {isActive ? 'Start with this size' : 'Choose this size'}
+                  </Link>
+                </motion.article>
+              )
+            })}
+          </motion.div>
 
           <p className="mib-pricing__finePrint">
-            All orders: matte vinyl, printed in the USA, reprinted free if anything's off.
+            Printed in the USA &middot; Reprinted if it&apos;s not right &middot; Ships in 3&ndash;5 days.
           </p>
         </div>
       </section>
 
-      {/* ── WHY MAKEITBIG ────────────────────────────────── */}
-      <section className="mib-section mib-reassure" id="why-makeitbig">
-        <div className="mib-shell">
-          <div className="mib-sectionIntro mib-sectionIntro--center">
-            <h2 className="mib-sectionIntro__title">
-              We make sure it looks right before it gets printed.
-            </h2>
-          </div>
-
-          <div className="mib-bentoGrid">
-            {/* Top-left: Smart file check -- spans 2 rows, teal accent */}
-            <article className="mib-bentoTile mib-bentoTile--file">
-              <div className="mib-bentoTile__icon" aria-hidden="true">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  <path d="M9 12l2 2 4-4" />
-                </svg>
-              </div>
-              <h3 className="mib-card__title">{TRUST_BLOCKS[0].title}</h3>
-              <p className="mib-card__body">{TRUST_BLOCKS[0].body}</p>
-            </article>
-
-            {/* Top-right: Fast turnaround -- yellow accent */}
-            <article className="mib-bentoTile mib-bentoTile--speed">
-              <div className="mib-bentoTile__icon" aria-hidden="true">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 6v6l4 2" />
-                </svg>
-              </div>
-              <h3 className="mib-card__title">{TRUST_BLOCKS[1].title}</h3>
-              <p className="mib-card__body">{TRUST_BLOCKS[1].body}</p>
-            </article>
-
-            {/* Bottom-right: Reprint guarantee -- red accent */}
-            <article className="mib-bentoTile mib-bentoTile--guarantee">
-              <div className="mib-bentoTile__icon" aria-hidden="true">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M1 4v6h6" />
-                  <path d="M23 20v-6h-6" />
-                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
-                </svg>
-              </div>
-              <h3 className="mib-card__title">{TRUST_BLOCKS[2].title}</h3>
-              <p className="mib-card__body">{TRUST_BLOCKS[2].body}</p>
-            </article>
-
-            {/* Bottom full-width: Printed in the USA -- dark */}
-            <article className="mib-bentoTile mib-bentoTile--usa">
-              <div className="mib-bentoTile__icon" aria-hidden="true">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 11l19-9-9 19-2-8-8-2z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="mib-card__title mib-bentoTile__usaTitle">{TRUST_BLOCKS[3].title}</h3>
-                <p className="mib-card__body mib-bentoTile__usaBody">{TRUST_BLOCKS[3].body}</p>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      {/* ── GALLERY ──────────────────────────────────────── */}
-      <section className="mib-section mib-gallery" id="gallery">
-        <div className="mib-shell">
-          <h2 className="mib-gallery__heading">Three sizes. All built to stand out.</h2>
-          <p className="mib-gallery__subhead">Matte vinyl, printed in the USA. Actual product photos coming soon.</p>
-
-          <div className="mib-galleryGrid">
-            <Link href="#hero" className="mib-gallerySlot mib-gallerySlot--sm">
-              <div className="mib-gallerySlot__banner" aria-hidden="true" />
-              <div className="mib-gallerySlot__info">
-                <span className="mib-gallerySlot__size">24" x 36"</span>
-                <span className="mib-gallerySlot__price">Starting at $30</span>
-              </div>
-            </Link>
-
-            <Link href="#hero" className="mib-gallerySlot mib-gallerySlot--md">
-              <div className="mib-gallerySlot__banner" aria-hidden="true" />
-              <div className="mib-gallerySlot__info">
-                <span className="mib-gallerySlot__size">36" x 72"</span>
-                <span className="mib-gallerySlot__price">Starting at $75</span>
-              </div>
-            </Link>
-
-            <Link href="#hero" className="mib-gallerySlot mib-gallerySlot--lg">
-              <div className="mib-gallerySlot__banner" aria-hidden="true" />
-              <div className="mib-gallerySlot__info">
-                <span className="mib-gallerySlot__size">48" x 96"</span>
-                <span className="mib-gallerySlot__price">Starting at $150</span>
-              </div>
-            </Link>
-          </div>
-
-          <div className="flex justify-center mt-14">
-            <Link href="#hero" className="mib-galleryBtn">Order Your Banner Now</Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── FINAL CTA ─────────────────────────────────────── */}
+      {/* FINAL CTA */}
       <section className="mib-finalCta">
         <div className="mib-shell">
-          <div className="mib-finalCta__content">
-            <h2 className="mib-finalCta__title">Your event deserves a banner that shows up.</h2>
-            <p className="mib-finalCta__copy">
-              Upload your file, see it at full size, and order in minutes.
-            </p>
-
-            <div className="mib-finalCta__actions">
-              <Link href="#hero" className="mib-btn mib-btn--light mib-btn--xl">
-                <span>Start Your Banner</span>
-              </Link>
-            </div>
-
-            <div className="mib-finalCta__trustRow">
-              <span className="mib-finalCta__trustMark">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
-                  <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-                </svg>
-                Reprinted free if it's not right
-              </span>
-              <span className="mib-finalCta__trustMark">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
-                  <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-                </svg>
-                Printed in the USA
-              </span>
-              <span className="mib-finalCta__trustMark">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}>
-                  <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-                </svg>
-                Ships in 3-5 days
-              </span>
-            </div>
-
-            <div className="mib-finalCta__testimonial">
-              <p className="mib-finalCta__quote">
-                "I uploaded my logo, got a preview in seconds, and the banner arrived before my event. Exactly what I needed."
+          <div className="mib-finalCta__split">
+            <div className="mib-finalCta__content">
+              <span className="mib-finalCta__eyebrow">Ready when you are</span>
+              <h2 className="mib-finalCta__title">Your banner should look big before you buy it.</h2>
+              <p className="mib-finalCta__copy">
+                Upload your design, preview the size, and order with a quick print-readiness check built in.
               </p>
-              <p className="mib-finalCta__attribution">Sarah M. — Phoenix, AZ</p>
+
+              <div className="mib-finalCta__actions">
+                <Link href="#hero" className="mib-btn mib-btn--light mib-btn--xl">
+                  <span>Start Your Banner</span>
+                </Link>
+              </div>
+
+              <div className="mib-finalCta__trustRow">
+                <span className="mib-finalCta__trustMark">Reprinted if it&apos;s not right</span>
+                <span className="mib-finalCta__trustMark">Printed in the USA</span>
+                <span className="mib-finalCta__trustMark">Ships in 3-5 days</span>
+              </div>
+            </div>
+
+            <div className="mib-finalCta__visual" aria-label="Illustrated storefront and banner scene">
+              <div className="mib-finalCta__testimonial">
+                <p className="mib-finalCta__quote">
+                  &quot;I uploaded my logo, got a preview in seconds, and the banner arrived before my event.&quot;
+                </p>
+                <p className="mib-finalCta__attribution">Sarah M. - Phoenix, AZ</p>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ── FOOTER ────────────────────────────────────────── */}
+      {/* FOOTER */}
       <footer className="mib-footer">
         <div className="mib-shell">
           <div className="mib-footer__top">
@@ -540,9 +1149,7 @@ export default function Home() {
             </div>
 
             <nav className="mib-footer__nav" aria-label="Footer">
-              <Link href="#how-it-works">How It Works</Link>
               <Link href="#pricing">Pricing</Link>
-              <Link href="#gallery">Gallery</Link>
               <Link href="/faq">FAQ</Link>
               <Link href="#hero">Start Your Banner</Link>
             </nav>
@@ -554,7 +1161,7 @@ export default function Home() {
           </div>
 
           <div className="mib-footer__bottom">
-            <p className="mib-footer__copy">© 2025 MakeItBig. All rights reserved.</p>
+            <p className="mib-footer__copy">(c) 2025 MakeItBig. All rights reserved.</p>
           </div>
         </div>
       </footer>
