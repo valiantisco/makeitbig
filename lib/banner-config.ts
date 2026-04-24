@@ -1,32 +1,45 @@
+export const CUSTOM_BANNER_PRODUCT_ID = 'banner-custom' as const
+
+/** Priced custom banners: width × height (ft), horizontal layout; price = W×H×$6/sq ft. */
+export const CUSTOM_PRICE_PER_SQ_FT = 6
+export const CUSTOM_FT_MIN = 0.5
+export const CUSTOM_FT_MAX = 50
+
+export function computeCustomPriceCents(widthFt: number, heightFt: number) {
+  const w = Math.max(0, widthFt)
+  const h = Math.max(0, heightFt)
+  return Math.round(w * h * CUSTOM_PRICE_PER_SQ_FT * 100)
+}
+
 export const BANNER_SIZES = [
   {
-    id: '2x3',
-    productId: 'banner-24x36',
-    label: '2 x 3',
+    id: '2x4',
+    productId: 'banner-24x48',
+    label: '2 x 4',
     shortIn: 24,
-    longIn: 36,
-    priceCents: 3000,
+    longIn: 48,
+    priceCents: 4000,
     baseAcceptablePpi: 72,
-    bestFor: 'Small booths, tabletop displays, and quick event signage.',
+    bestFor: 'Compact signage for tables, small booths, and tight spaces.',
   },
   {
-    id: '3-5x6',
-    productId: 'banner-42x72',
-    label: '3.5 x 6',
-    shortIn: 42,
+    id: '3x6',
+    productId: 'banner-36x72',
+    label: '3 x 6',
+    shortIn: 36,
     longIn: 72,
-    priceCents: 7500,
+    priceCents: 9000,
     baseAcceptablePpi: 56,
     bestFor: 'The easy default for booths, walls, and storefront visibility.',
   },
   {
-    id: '5-5x10',
-    productId: 'banner-66x120',
-    label: '5.5 x 10',
-    shortIn: 66,
-    longIn: 120,
-    priceCents: 15000,
-    baseAcceptablePpi: 42,
+    id: '4x8',
+    productId: 'banner-48x96',
+    label: '4 x 8',
+    shortIn: 48,
+    longIn: 96,
+    priceCents: 16000,
+    baseAcceptablePpi: 44,
     bestFor: 'Large backdrops, wide walls, and big-room impact.',
   },
 ] as const
@@ -88,6 +101,16 @@ export function getOrderHref(sizeId: PrintSizeId, orientation: PrintOrientation)
   return `/order?size=${productId}&orientation=${orientation}`
 }
 
+export function getCustomOrderHref(
+  orientation: PrintOrientation,
+  widthFt = 4,
+  heightFt = 8,
+) {
+  const w = clamp(widthFt, CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+  const h = clamp(heightFt, CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+  return `/order?size=${CUSTOM_BANNER_PRODUCT_ID}&orientation=${orientation}&cw=${w}&ch=${h}`
+}
+
 export function getBannerPrintDimensions(size: BannerSize, orientation: PrintOrientation) {
   return {
     widthIn: orientation === 'horizontal' ? size.longIn : size.shortIn,
@@ -126,12 +149,15 @@ export function getProductPrintDimensions(product: ProductLike, orientation: Pri
 
 export function getProductTier(product: ProductLike) {
   const longIn = Math.max(product.width_in, product.height_in)
-  if (product.price_cents === 7500 || longIn === 72) return 'featured'
-  if (longIn >= 100 || (product.price_cents ?? 0) >= 15000) return 'large'
+  if (product.price_cents === 9000 || longIn === 72) return 'featured'
+  if (longIn >= 96 || (product.price_cents ?? 0) >= 16000) return 'large'
   return 'small'
 }
 
 export function getProductUse(product: ProductLike) {
+  if (product.id === CUSTOM_BANNER_PRODUCT_ID) {
+    return 'Any width and height in feet—priced at $6 per square foot.'
+  }
   const tier = getProductTier(product)
   if (tier === 'featured') return 'The easy default for booths, walls, and storefront visibility.'
   if (tier === 'large') return 'Big-room impact for backdrops, fences, and wide walls.'
@@ -140,9 +166,9 @@ export function getProductUse(product: ProductLike) {
 
 export function getRecommendedProduct<T extends ProductLike>(products: T[]) {
   return (
-    products.find((product) => product.price_cents === 7500) ??
+    products.find((product) => product.price_cents === 9000) ??
     products.find((product) => Math.max(product.width_in, product.height_in) === 72) ??
-    products[1] ??
+    products.find((product) => product.id !== CUSTOM_BANNER_PRODUCT_ID) ??
     products[0] ??
     null
   )

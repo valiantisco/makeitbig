@@ -4,9 +4,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties, DragEvent, ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
-import Link from 'next/link'
+import { BrandLogo } from '@/components/BrandLogo'
+import { Shell } from '@/components/Shell'
 import {
+  clamp,
+  computeCustomPriceCents,
+  CUSTOM_BANNER_PRODUCT_ID,
+  CUSTOM_FT_MAX,
+  CUSTOM_FT_MIN,
+  CUSTOM_PRICE_PER_SQ_FT,
   cx,
+  formatFeet,
   formatFileSize,
   formatPrice,
   getProductFormatLabel,
@@ -45,7 +53,7 @@ type FileState = {
   validation: ValidationResult | null
 }
 
-type CheckoutState = 'idle' | 'submitting'
+type CheckoutState = 'idle' | 'submitting' | 'error'
 
 type DeliveryEstimate = {
   range: string
@@ -66,15 +74,18 @@ type OrderFlowProps = {
 const FILE_SIZE_LIMIT_MB = 50
 const RESUME_DRAFT_KEY = 'mib_resume_draft'
 
+function parseFtParam(value: string | null, fallback: number) {
+  if (value === null || value === '') return fallback
+  const n = Number.parseFloat(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
 const STANDARD_DELIVERY: DeliveryEstimate = {
   range: 'Ships in 3-5 days',
   note: 'After file approval',
 }
 
-/**
- * Flip to true once Supabase Storage upload + Stripe session are wired.
- */
-const CHECKOUT_ENABLED = false
+const CHECKOUT_ENABLED = true
 
 function saveResumeDraft(draft: ResumeDraft): void {
   try {
@@ -171,19 +182,54 @@ function getFileSizeError(file: File): string | null {
   return null
 }
 
-function getCardPreviewStyle(product: Pick<Product, 'width_in' | 'height_in'>, orientation: PrintOrientation) {
+/** Scene content area inside `.mib-orderSizeCard__scene` (padding ~12px each side). */
+const ORDER_CARD_PREVIEW_BOX = { w: 184, h: 112 }
+
+function resolveCardLayoutProduct(
+  product: Product,
+  selectedId: string | null,
+  selectedProduct: Product | null,
+): Product {
+  if (
+    product.id === CUSTOM_BANNER_PRODUCT_ID &&
+    selectedId === CUSTOM_BANNER_PRODUCT_ID &&
+    selectedProduct
+  ) {
+    return selectedProduct
+  }
+  return product
+}
+
+function computeOrderCardPreviewPxPerInch(
+  products: Product[],
+  orientation: PrintOrientation,
+  selectedId: string | null,
+  selectedProduct: Product | null,
+): number {
+  let maxW = 0
+  let maxH = 0
+  for (const p of products) {
+    const layout = resolveCardLayoutProduct(p, selectedId, selectedProduct)
+    const { widthIn, heightIn } = getProductPrintDimensions(layout, orientation)
+    maxW = Math.max(maxW, widthIn)
+    maxH = Math.max(maxH, heightIn)
+  }
+  if (maxW <= 0 || maxH <= 0) return 1
+  return Math.min(ORDER_CARD_PREVIEW_BOX.w / maxW, ORDER_CARD_PREVIEW_BOX.h / maxH)
+}
+
+function getCardPreviewStyle(
+  product: Pick<Product, 'width_in' | 'height_in'>,
+  orientation: PrintOrientation,
+  pxPerInch: number,
+) {
   const { widthIn, heightIn } = getProductPrintDimensions(product, orientation)
-  const aspect = widthIn / heightIn
-  const width = orientation === 'horizontal'
-    ? Math.min(190, Math.max(126, 92 * aspect))
-    : Math.min(94, Math.max(56, 118 / aspect))
-  const height = orientation === 'horizontal'
-    ? Math.min(82, Math.max(50, 118 / aspect))
-    : Math.min(132, Math.max(86, 96 * aspect))
+  const pxW = widthIn * pxPerInch
+  const pxH = heightIn * pxPerInch
 
   return {
-    '--mib-card-shape-w': `${width}px`,
-    '--mib-card-shape-h': `${height}px`,
+    '--mib-card-shape-w': `${Math.round(pxW)}px`,
+    '--mib-card-shape-h': `${Math.round(pxH)}px`,
   } as CSSProperties
 }
 
@@ -195,9 +241,34 @@ export default function OrderFlow({ products }: OrderFlowProps) {
   const orientationParam = searchParams.get('orientation')
   const selectedOrientation: PrintOrientation = orientationParam === 'vertical' ? 'vertical' : 'horizontal'
 
-  const selectedProduct = useMemo(() => {
+  const customWRaw = parseFtParam(searchParams.get('cw'), 4)
+  const customHRaw = parseFtParam(searchParams.get('ch'), 8)
+  const customW = clamp(customWRaw, CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+  const customH = clamp(customHRaw, CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+
+  const rawSelected = useMemo(() => {
+    if (!selectedId) return getRecommendedProduct(products)
     return products.find((product) => product.id === selectedId) ?? getRecommendedProduct(products)
   }, [products, selectedId])
+
+  const selectedProduct = useMemo(() => {
+    if (!rawSelected) return null
+    if (rawSelected.id !== CUSTOM_BANNER_PRODUCT_ID) return rawSelected
+    const shortIn = Math.min(customW, customH) * 12
+    const longIn = Math.max(customW, customH) * 12
+    return {
+      ...rawSelected,
+      width_in: shortIn,
+      height_in: longIn,
+      price_cents: computeCustomPriceCents(customW, customH),
+      name: `Custom ${formatFeet(customW)} × ${formatFeet(customH)} ft Vinyl Banner`,
+    }
+  }, [rawSelected, customW, customH])
+
+  const cardPreviewPxPerInch = useMemo(
+    () => computeOrderCardPreviewPxPerInch(products, selectedOrientation, selectedId, selectedProduct),
+    [products, selectedOrientation, selectedId, selectedProduct],
+  )
 
   const [hasActiveFile, setHasActiveFile] = useState(false)
   const [pendingProductId, setPendingProductId] = useState<string | null>(null)
@@ -211,11 +282,32 @@ export default function OrderFlow({ products }: OrderFlowProps) {
     const params = new URLSearchParams(searchParams.toString())
     if (nextSizeId) params.set('size', nextSizeId)
     params.set('orientation', nextOrientation)
+    if (nextSizeId === CUSTOM_BANNER_PRODUCT_ID) {
+      const w = clamp(parseFtParam(params.get('cw'), 4), CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+      const h = clamp(parseFtParam(params.get('ch'), 8), CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+      params.set('cw', String(w))
+      params.set('ch', String(h))
+    } else if (nextSizeId) {
+      params.delete('cw')
+      params.delete('ch')
+    }
     router.replace(`/order?${params.toString()}`, { scroll: false })
   }
 
   function commitSizeChange(productId: string) {
-    replaceQuery(productId, selectedOrientation)
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('size', productId)
+    params.set('orientation', selectedOrientation)
+    if (productId === CUSTOM_BANNER_PRODUCT_ID) {
+      const w = clamp(parseFtParam(params.get('cw'), 4), CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+      const h = clamp(parseFtParam(params.get('ch'), 8), CUSTOM_FT_MIN, CUSTOM_FT_MAX)
+      params.set('cw', String(w))
+      params.set('ch', String(h))
+    } else {
+      params.delete('cw')
+      params.delete('ch')
+    }
+    router.replace(`/order?${params.toString()}`, { scroll: false })
   }
 
   function handleSelect(productId: string) {
@@ -233,7 +325,7 @@ export default function OrderFlow({ products }: OrderFlowProps) {
       setHasActiveFile(false)
       clearResumeDraft()
     }
-    replaceQuery(selectedProduct?.id ?? null, nextOrientation)
+    replaceQuery(selectedId ?? selectedProduct?.id ?? null, nextOrientation)
   }
 
   function handleConfirmSizeChange() {
@@ -252,17 +344,15 @@ export default function OrderFlow({ products }: OrderFlowProps) {
   return (
     <div className="mib-order">
       <nav className="mib-nav mib-orderNav" aria-label="Order navigation">
-        <div className="mib-shell mib-nav__inner">
-          <Link href="/" className="mib-nav__logo" aria-label="MakeItBig home">
-            <Image
-              src="/mib-logo.svg"
-              alt="MakeItBig"
-              width={140}
-              height={43}
-              priority
-              style={{ filter: 'brightness(0) invert(1)' }}
-            />
-          </Link>
+        <Shell className="mib-nav__inner">
+          <BrandLogo
+            className="mib-nav__logo"
+            aria-label="MakeItBig home"
+            width={140}
+            height={43}
+            inverted
+            priority
+          />
 
           <div className="mib-orderProgress" aria-label="Order progress">
             <StepPill number="01" label="Size" state={selectedProduct ? 'done' : 'active'} />
@@ -275,26 +365,26 @@ export default function OrderFlow({ products }: OrderFlowProps) {
             <span className="mib-orderProgress__line" aria-hidden />
             <StepPill number="03" label="Review" state={hasActiveFile ? 'active' : 'inactive'} />
           </div>
-        </div>
+        </Shell>
       </nav>
 
       <main className="mib-orderMain">
-        <section className="mib-shell mib-orderHero" aria-labelledby="order-title">
-          <p className="mib-orderEyebrow">Order your banner</p>
-          <h1 id="order-title" className="mib-orderTitle">
+        <Shell as="section" className="mib-orderHero" aria-labelledby="order-title">
+          <p className="mib-orderEyebrow mib-p3">Order your banner</p>
+          <h1 id="order-title" className="mib-orderTitle mib-h1">
             Pick the <span>right size</span>. Upload the file. We check the print.
           </h1>
-          <p className="mib-orderIntro">
+          <p className="mib-orderIntro mib-p1">
             Choose a banner format, then send us your design. We preview the crop, check resolution,
             and help you avoid bad prints before you buy.
           </p>
-        </section>
+        </Shell>
 
-        <section className="mib-shell mib-orderPanel" aria-labelledby="size-heading">
+        <Shell as="section" className="mib-orderPanel" aria-labelledby="size-heading">
           <div className="mib-orderPanel__head">
             <div>
               <span className="mib-orderStepLabel">Step 01</span>
-              <h2 id="size-heading" className="mib-orderPanel__title">Choose size and direction</h2>
+              <h2 id="size-heading" className="mib-orderPanel__title mib-h2">Choose size and direction</h2>
             </div>
 
             <div className="mib-orderOrientation" aria-label="Choose banner orientation">
@@ -322,16 +412,49 @@ export default function OrderFlow({ products }: OrderFlowProps) {
           </div>
 
           <div className="mib-orderSizeGrid">
-            {products.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                orientation={selectedOrientation}
-                isSelected={selectedProduct?.id === product.id}
-                onSelect={handleSelect}
-              />
-            ))}
+            {products.map((product) => {
+              const layoutProduct = resolveCardLayoutProduct(product, selectedId, selectedProduct)
+              return (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  layoutProduct={layoutProduct}
+                  orientation={selectedOrientation}
+                  previewPxPerInch={cardPreviewPxPerInch}
+                  isSelected={selectedProduct?.id === product.id}
+                  onSelect={handleSelect}
+                  displayPriceCents={
+                    product.id === CUSTOM_BANNER_PRODUCT_ID
+                      ? computeCustomPriceCents(customW, customH)
+                      : product.price_cents
+                  }
+                  sizeHeading={
+                    product.id === CUSTOM_BANNER_PRODUCT_ID
+                      ? selectedId === CUSTOM_BANNER_PRODUCT_ID
+                        ? `${formatFeet(customW)} × ${formatFeet(customH)} ft`
+                        : 'Custom size'
+                      : undefined
+                  }
+                />
+              )
+            })}
           </div>
+
+          {selectedId === CUSTOM_BANNER_PRODUCT_ID && (
+            <CustomSizeFields
+              key={`custom-${customW}-${customH}`}
+              widthFt={customW}
+              heightFt={customH}
+              onApply={(nextW, nextH) => {
+                const params = new URLSearchParams(searchParams.toString())
+                params.set('size', CUSTOM_BANNER_PRODUCT_ID)
+                params.set('orientation', selectedOrientation)
+                params.set('cw', String(clamp(nextW, CUSTOM_FT_MIN, CUSTOM_FT_MAX)))
+                params.set('ch', String(clamp(nextH, CUSTOM_FT_MIN, CUSTOM_FT_MAX)))
+                router.replace(`/order?${params.toString()}`, { scroll: false })
+              }}
+            />
+          )}
 
           {pendingProduct !== null && (
             <SizeChangeConfirmation
@@ -340,7 +463,7 @@ export default function OrderFlow({ products }: OrderFlowProps) {
               onCancel={handleCancelSizeChange}
             />
           )}
-        </section>
+        </Shell>
 
         {selectedProduct !== null && pendingProduct === null && (
           <UploadSection
@@ -376,6 +499,78 @@ function StepPill({
   )
 }
 
+function CustomSizeFields({
+  widthFt,
+  heightFt,
+  onApply,
+}: {
+  widthFt: number
+  heightFt: number
+  onApply: (w: number, h: number) => void
+}) {
+  const [wInput, setWInput] = useState(() => String(widthFt))
+  const [hInput, setHInput] = useState(() => String(heightFt))
+
+  function handleApply() {
+    const w = Number.parseFloat(wInput)
+    const h = Number.parseFloat(hInput)
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return
+    onApply(w, h)
+  }
+
+  const previewCents = computeCustomPriceCents(
+    clamp(Number.parseFloat(wInput) || 0, CUSTOM_FT_MIN, CUSTOM_FT_MAX),
+    clamp(Number.parseFloat(hInput) || 0, CUSTOM_FT_MIN, CUSTOM_FT_MAX),
+  )
+
+  return (
+    <div className="mib-orderCustomSize" aria-labelledby="custom-size-heading">
+      <h3 id="custom-size-heading" className="mib-orderCustomSize__title mib-h3">Custom dimensions (feet)</h3>
+      <p className="mib-orderCustomSize__copy mib-p2">
+        Enter width and height for a horizontal layout. Price is{' '}
+        <strong>${CUSTOM_PRICE_PER_SQ_FT} per square foot</strong> (width × height).
+      </p>
+      <div className="mib-orderCustomSize__row">
+        <label className="mib-orderCustomSize__field">
+          <span className="mib-orderCustomSize__label">Width (ft)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={CUSTOM_FT_MIN}
+            max={CUSTOM_FT_MAX}
+            step="0.25"
+            value={wInput}
+            onChange={(e) => setWInput(e.target.value)}
+            className="mib-orderCustomSize__input"
+          />
+        </label>
+        <span className="mib-orderCustomSize__times" aria-hidden>×</span>
+        <label className="mib-orderCustomSize__field">
+          <span className="mib-orderCustomSize__label">Height (ft)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={CUSTOM_FT_MIN}
+            max={CUSTOM_FT_MAX}
+            step="0.25"
+            value={hInput}
+            onChange={(e) => setHInput(e.target.value)}
+            className="mib-orderCustomSize__input"
+          />
+        </label>
+      </div>
+      <div className="mib-orderCustomSize__footer">
+        <p className="mib-orderCustomSize__price mib-p2">
+          Estimated price: <strong>{formatPrice(previewCents)}</strong>
+        </p>
+        <button type="button" className="mib-orderButton mib-orderButton--gradient" onClick={handleApply}>
+          Update dimensions
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SizeChangeConfirmation({
   pendingProduct,
   onConfirm,
@@ -405,18 +600,26 @@ function SizeChangeConfirmation({
 
 function ProductCard({
   product,
+  layoutProduct,
   orientation,
+  previewPxPerInch,
   isSelected,
   onSelect,
+  displayPriceCents,
+  sizeHeading,
 }: {
   product: Product
+  layoutProduct: Product
   orientation: PrintOrientation
+  previewPxPerInch: number
   isSelected: boolean
   onSelect: (id: string) => void
+  displayPriceCents: number
+  sizeHeading?: string
 }) {
-  const tier = getProductTier(product)
+  const tier = getProductTier(layoutProduct)
   const isFeatured = tier === 'featured'
-  const style = getCardPreviewStyle(product, orientation)
+  const style = getCardPreviewStyle(layoutProduct, orientation, previewPxPerInch)
 
   return (
     <button
@@ -441,10 +644,10 @@ function ProductCard({
 
       <div className="mib-orderSizeCard__header">
         <div>
-          <h3 className="mib-orderSizeCard__size">{getProductSizeLabel(product)}</h3>
+          <h3 className="mib-orderSizeCard__size">{sizeHeading ?? getProductSizeLabel(product)}</h3>
           <p className="mib-orderSizeCard__meta">{orientation} preview</p>
         </div>
-        <strong className="mib-orderSizeCard__price">{formatPrice(product.price_cents)}</strong>
+        <strong className="mib-orderSizeCard__price">{formatPrice(displayPriceCents)}</strong>
       </div>
 
       <div className="mib-orderSizeCard__body">
@@ -471,6 +674,7 @@ function UploadSection({
   const [fileState, setFileState] = useState<FileState | null>(null)
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [checkoutState, setCheckoutState] = useState<CheckoutState>('idle')
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [resumeHint, setResumeHint] = useState<string | null>(() => {
     const saved = loadResumeDraft()
     return saved && saved.productId === selectedProduct.id && saved.orientation === orientation
@@ -501,13 +705,13 @@ function UploadSection({
     () =>
       fileState?.validation != null
         ? {
-            product: selectedProduct,
-            orientation,
-            fileName: fileState.file.name,
-            fileSizeBytes: fileState.file.size,
-            fileType: fileState.file.type,
-            validation: fileState.validation,
-          }
+          product: selectedProduct,
+          orientation,
+          fileName: fileState.file.name,
+          fileSizeBytes: fileState.file.size,
+          fileType: fileState.file.type,
+          validation: fileState.validation,
+        }
         : null,
     [fileState, orientation, selectedProduct],
   )
@@ -543,6 +747,7 @@ function UploadSection({
     setSizeError(null)
     setResumeHint(null)
     setCheckoutState('idle')
+    setCheckoutError(null)
 
     const sizeErr = getFileSizeError(selected)
     if (sizeErr) {
@@ -571,13 +776,13 @@ function UploadSection({
         setFileState((prev) =>
           prev
             ? {
-                ...prev,
-                validation: {
-                  status: 'bad',
-                  message: 'Could not read image dimensions.',
-                  recommendation: 'Try a PNG, JPG, or PDF export from your design tool.',
-                },
-              }
+              ...prev,
+              validation: {
+                status: 'bad',
+                message: 'Could not read image dimensions.',
+                recommendation: 'Try a PNG, JPG, or PDF export from your design tool.',
+              },
+            }
             : prev,
         )
         imgLoadRef.current = null
@@ -610,22 +815,67 @@ function UploadSection({
     setFileState(null)
     setSizeError(null)
     setCheckoutState('idle')
+    setCheckoutError(null)
     setResumeHint(null)
     clearResumeDraft()
   }
 
-  function handleCheckout() {
+  async function handleCheckout() {
     if (!CHECKOUT_ENABLED || !orderDraft || !fileState) return
     setCheckoutState('submitting')
+    setCheckoutError(null)
+
+    try {
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          productId: orderDraft.product.id,
+          orientation: orderDraft.orientation,
+          customWidthFt:
+            orderDraft.product.id === CUSTOM_BANNER_PRODUCT_ID
+              ? orderDraft.product.width_in / 12
+              : undefined,
+          customHeightFt:
+            orderDraft.product.id === CUSTOM_BANNER_PRODUCT_ID
+              ? orderDraft.product.height_in / 12
+              : undefined,
+          fileName: orderDraft.fileName,
+          fileType: orderDraft.fileType,
+          validationStatus: orderDraft.validation.status,
+        }),
+      })
+
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; url?: string }
+        | null
+
+      if (!response.ok || !payload?.url) {
+        throw new Error(
+          payload?.error || 'Could not start secure checkout. Please try again.',
+        )
+      }
+
+      window.location.assign(payload.url)
+    } catch (error) {
+      setCheckoutState('error')
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : 'Could not start secure checkout. Please try again.',
+      )
+    }
   }
 
   return (
-    <section className="mib-shell mib-orderUpload" aria-labelledby="upload-heading">
+    <Shell as="section" className="mib-orderUpload" aria-labelledby="upload-heading">
       <div className="mib-orderPanel__head mib-orderPanel__head--upload">
         <div>
-          <span className="mib-orderStepLabel">Step 02</span>
-          <h2 id="upload-heading" className="mib-orderPanel__title">Upload your design</h2>
-          <p className="mib-orderPanel__copy">
+          <span className="mib-orderStepLabel mib-p3">Step 02</span>
+          <h2 id="upload-heading" className="mib-orderPanel__title mib-h2">Upload your design</h2>
+          <p className="mib-orderPanel__copy mib-p2">
             Selected format: {getProductFormatLabel(selectedProduct, orientation)}. We will check resolution before you checkout.
           </p>
         </div>
@@ -686,11 +936,12 @@ function UploadSection({
             delivery={STANDARD_DELIVERY}
             checkoutState={checkoutState}
             checkoutEnabled={CHECKOUT_ENABLED}
+            checkoutError={checkoutError}
             onCheckout={handleCheckout}
           />
         )}
       </div>
-    </section>
+    </Shell>
   )
 }
 
@@ -720,8 +971,8 @@ function EmptyUpload({
         </svg>
       </span>
 
-      <h3>Upload your design to run a print check.</h3>
-      <p>Drop a PNG, JPG, or PDF here. We will preview it for {selectedLabel}.</p>
+      <h3 className="mib-h3">Upload your design to run a print check.</h3>
+      <p className="mib-p2">Drop a PNG, JPG, or PDF here. We will preview it for {selectedLabel}.</p>
 
       <button type="button" className="mib-orderButton mib-orderButton--gradient" onClick={(event) => {
         event.stopPropagation()
@@ -731,11 +982,11 @@ function EmptyUpload({
       </button>
 
       {sizeError ? (
-        <p className="mib-orderUploadNote is-error" role="alert">{sizeError}</p>
+        <p className="mib-orderUploadNote mib-p3 is-error" role="alert">{sizeError}</p>
       ) : resumeHint ? (
-        <p className="mib-orderUploadNote">Last file: <strong>{resumeHint}</strong>. Upload it again to continue.</p>
+        <p className="mib-orderUploadNote mib-p3">Last file: <strong>{resumeHint}</strong>. Upload it again to continue.</p>
       ) : (
-        <p className="mib-orderUploadNote">PNG · JPG · PDF · Max {FILE_SIZE_LIMIT_MB} MB</p>
+        <p className="mib-orderUploadNote mib-p3">PNG · JPG · PDF · Max {FILE_SIZE_LIMIT_MB} MB</p>
       )}
     </div>
   )
@@ -778,7 +1029,7 @@ function FilePreview({
       </div>
 
       {validation === null ? (
-        <p className="mib-orderChecking" aria-live="polite">
+        <p className="mib-orderChecking mib-p2" aria-live="polite">
           Checking print quality<span><i /><i /><i /></span>
         </p>
       ) : (
@@ -808,15 +1059,15 @@ function UploadGuidePanel({
 
   return (
     <aside className="mib-orderGuide" aria-label="Print checks that run after upload">
-      <span className="mib-orderStepLabel">Step 03</span>
-      <h3>Live print check</h3>
-      <p>Upload a file and this panel turns into your order review.</p>
+      <span className="mib-orderStepLabel mib-p3">Step 03</span>
+      <h3 className="mib-h3">Live print check</h3>
+      <p className="mib-p2">Upload a file and this panel turns into your order review.</p>
       <ul>
         {checks.map(([title, body]) => (
           <li key={title}>
             <span>Runs after upload</span>
-            <strong>{title}</strong>
-            <p>{body}</p>
+            <strong className="mib-h3">{title}</strong>
+            <p className="mib-p3">{body}</p>
           </li>
         ))}
       </ul>
@@ -827,9 +1078,9 @@ function UploadGuidePanel({
 function ValidationBadge({ validation }: { validation: ValidationResult }) {
   return (
     <div className={cx('mib-orderValidation', `is-${validation.status}`)} role="status" aria-live="polite">
-      <strong>{validation.message}</strong>
-      {validation.recommendation && <p>{validation.recommendation}</p>}
-      {validation.payoff && <p>{validation.payoff}</p>}
+      <strong className="mib-h3">{validation.message}</strong>
+      {validation.recommendation && <p className="mib-p3">{validation.recommendation}</p>}
+      {validation.payoff && <p className="mib-p3">{validation.payoff}</p>}
     </div>
   )
 }
@@ -845,12 +1096,14 @@ function OrderSummary({
   delivery,
   checkoutState,
   checkoutEnabled,
+  checkoutError,
   onCheckout,
 }: {
   draft: OrderDraft
   delivery: DeliveryEstimate
   checkoutState: CheckoutState
   checkoutEnabled: boolean
+  checkoutError: string | null
   onCheckout: () => void
 }) {
   const { product, orientation, fileName, validation } = draft
@@ -861,12 +1114,12 @@ function OrderSummary({
   return (
     <aside className={cx('mib-orderSummary', `is-${validation.status}`)} aria-label="Order summary">
       <div className="mib-orderSummary__head">
-        <span className="mib-orderStepLabel">Step 03</span>
+        <span className="mib-orderStepLabel mib-p3">Step 03</span>
         <span className={cx('mib-orderStatusChip', `is-${validation.status}`)}>{QUALITY_LABELS[validation.status]}</span>
       </div>
 
-      <h3>Review before checkout</h3>
-      <p className="mib-orderSummary__copy">We checked the file against your selected banner format.</p>
+      <h3 className="mib-h3">Review before checkout</h3>
+      <p className="mib-orderSummary__copy mib-p2">We checked the file against your selected banner format.</p>
 
       <div className="mib-orderSummary__rows">
         <SummaryRow label="Banner">
@@ -880,9 +1133,9 @@ function OrderSummary({
         </SummaryRow>
       </div>
 
-      {blocked && <p className="mib-orderSummary__alert" role="alert">Upload a higher-resolution file to continue.</p>}
-      {!checkoutEnabled && (
-        <p className="mib-orderSummary__devNote">Checkout is not connected yet in this build.</p>
+      {blocked && <p className="mib-orderSummary__alert mib-p3" role="alert">Upload a higher-resolution file to continue.</p>}
+      {checkoutError && (
+        <p className="mib-orderSummary__alert mib-p3" role="alert">{checkoutError}</p>
       )}
 
       <button
@@ -894,14 +1147,12 @@ function OrderSummary({
       >
         {submitting
           ? 'Processing...'
-          : !checkoutEnabled
-            ? 'Checkout coming soon'
-            : blocked
+          : blocked
               ? 'Upload sharper file'
               : 'Continue to checkout'}
       </button>
 
-      <p className="mib-orderSummary__fine">You will not be charged until checkout is complete.</p>
+      <p className="mib-orderSummary__fine mib-p3">You will not be charged until checkout is complete.</p>
     </aside>
   )
 }
